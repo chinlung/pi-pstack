@@ -1,0 +1,62 @@
+{
+	"name": "pi-pstack",
+	"version": "0.1.0",
+	"description": "pstack for Pi: rigorous, verifiable engineering workflows. Model-aware playbooks, deliberate subagents, unslopped prose, and proof before done.",
+	"license": "MIT",
+	"keywords": [
+		"pi-package",
+		"pstack",
+		"poteto-mode",
+		"workflow",
+		"principles",
+		"subagents",
+		"unslop",
+		"verification"
+	],
+	"author": {
+		"name": "pi-pstack contributors"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/chinlung/pi-pstack"
+	},
+	"pi": {
+		"extensions": [
+			"./extension/index.ts"
+		],
+		"skills": [
+			"./skills"
+		],
+		"subagents": {
+			"agents": [
+				"./agents"
+			]
+		}
+	},
+	"scripts": {
+		"typecheck": "tsc --project extension/tsconfig.json --noEmit",
+		"test": "node --experimental-strip-types --test extension/tests/*.test.ts",
+		"link:host": "node scripts/link-host-packages.mjs",
+		"port:skills": "node scripts/port-skills.mjs",
+		"check:skills": "node scripts/port-skills.mjs --check"
+	},
+	"files": [
+		"extension",
+		"skills",
+		"agents",
+		"docs",
+		"scripts",
+		"upstream",
+		"overrides",
+		"LICENSE",
+		"README.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		}
+	}
+}

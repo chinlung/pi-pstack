@@ -1,0 +1,6 @@
+node_modules/
+*.local.md
+.pi/
+.claude/
+.codex/
+.DS_Store
