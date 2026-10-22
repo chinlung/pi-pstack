@@ -1,6 +1,6 @@
 # Run work while you sleep
 
-This is the payoff for everything before it. An agent you can trust to verify its own work is an agent you can leave alone with a hard task. What makes that safe isn't hope. It's a checkable finish condition, an isolated worktree or cloud agent, and a decision log you audit in the morning.
+This is the payoff for everything before it. An agent you can trust to verify its own work is an agent you can leave alone with a hard task. What makes that safe isn't hope. It's a checkable finish condition, an isolated worktree, and a decision log you audit in the morning.
 
 ![She waves goodnight from the door while robots keep the factory running, one updating a DECISION LOG wall board under a BUILD LOOP ACTIVE sign.](./images/overnight.jpg)
 
@@ -97,12 +97,12 @@ A long-lived Pi session gives one coordinator agent a persistent thread. The coo
 
 A few habits help:
 
-- Give each body of work its own Project, such as a feature, a migration, a perf push, or a tech-debt cleanup. Several can run side by side.
-- Drag related chats into the Project, finished ones included. They become context for every agent in it.
+- Give each body of work its own worktree and Pi session, such as a feature, a migration, a perf push, or a tech-debt cleanup. Several can run side by side.
+- When agents need shared context, put the notes or transcript paths in each brief. Pi sessions do not share context on their own.
 - Give each PR a verification swarm before it merges, and let Autopilot-stack or Autopilot-full carry the queue.
 - Ask the coordinator for a plan backed by data, and have it answer open questions with prototypes before it asks you.
 
-One prompt can carry a whole Project, from research through execution:
+One prompt can carry a whole body of work, from research through execution:
 
 ```text
 /poteto-mode refactor this repo so its architecture is more agent friendly. use /correct and /architect on past commits and review comments to find the mistakes agents make most here. use /recall for context from past chats. answer open questions with prototypes instead of asking me. come back with a plan backed by real data. once i approve it, run it with autopilot-stack or autopilot-full, and ask me which.
@@ -115,7 +115,7 @@ Every loop above still waits for you to start it. A scheduled or event-driven au
 - Every stage can stop the line. Triage can decide the report is expected behavior, repro can fail to reproduce it, and the fixer can judge the change too risky. Each of those outcomes is useful, because it keeps bad work from reaching the next stage, where it costs more to undo.
 - Every stage hands over evidence. Repro attaches screenshots and video of the broken state, and the fix attaches before-and-after proof. A human can then check that the agent fixed the right thing before reading a line of code.
 
-pstack ships this as a dormant [automation pack](https://github.com/cursor/plugins/blob/main/pstack/automations/benny/README.md) for Slack issue reports. One automation triages each report. The other reproduces confirmed bugs and may prepare a small draft fix. Point an agent at its [`FOR_AGENTS.md`](https://github.com/cursor/plugins/blob/main/pstack/automations/benny/FOR_AGENTS.md) and name the target repository to set it up.
+Upstream Upstream pstack ships this as a dormant [automation pack](https://github.com/cursor/plugins/blob/main/pstack/automations/benny/README.md) for Slack issue reports. One automation triages each report. The other reproduces confirmed bugs and may prepare a small draft fix. Point an agent at its [`FOR_AGENTS.md`](https://github.com/cursor/plugins/blob/main/pstack/automations/benny/FOR_AGENTS.md) and name the target repository to set it up. It needs Cursor Automations, which Pi does not have, so skip it in Pi. It needs Cursor Automations, which Pi does not have, so skip it in Pi.
 
 **Pitfall:** a duration is not a finish condition. "work on this for 4 hours" gives the agent nothing to check, and you'll wake up to four hours of motion instead of a result. Give a polling watcher a predicate that can pass or fail.
 

@@ -78,6 +78,6 @@ Comments need their own pass, and not from the agent that wrote them. An author 
 
 The division of labor is worth keeping straight. the `unslop` skill cleans slop out of the code, `/unslop` cleans it out of prose, and `/no-comments` hands the comments to a reviewer who didn't write them.
 
-**Pitfall:** cleanup is not optional polish. A diff with narrating comments and defensive dead weight reads as unfinished to reviewers, and the extra code is where the next bug hides. If the diff feels padded, say `deslop it` before you commit, not after review calls it out.
+**Pitfall:** cleanup is not optional polish. A diff with narrating comments and defensive dead weight reads as unfinished to reviewers, and the extra code is where the next bug hides. If the diff feels padded, say `unslop the diff` before you commit, not after review calls it out.
 
 Next: [Verify and ship](./06-verify-and-ship.md).

@@ -16,7 +16,7 @@
  *   node scripts/port-skills.mjs            # write skills/ and agents/
  *   node scripts/port-skills.mjs --check    # fail if skills/ is out of date
  */
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, extname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { danglingLinks, relinkUnshipped } from "./port-links.mjs";
@@ -49,6 +49,7 @@ const REPLACEMENTS = [
 	[/`Task` call/g, "`subagent` call"],
 	[/\bTask spawn\b/g, "subagent spawn"],
 	[/with the Task tool/g, "with the `subagent` tool"],
+	[/only through the Task tool/g, "only through the `subagent` tool"],
 	[/If the Task tool rejects/g, "If the `subagent` tool rejects"],
 	[/omit Task `model`/g, "omit the `model` field"],
 	[
@@ -57,7 +58,7 @@ const REPLACEMENTS = [
 	],
 	[
 		/Substituting `generalPurpose` skips that read and drifts/g,
-		"Substituting a plain agent skips that read and drifts.",
+		"Substituting a plain agent skips that read and drifts",
 	],
 	[
 		/set their own `subagent_type` for diverse-model review/g,
@@ -98,6 +99,7 @@ const REPLACEMENTS = [
 	[/`\.cursor\/skills\/<handle>\/<handle>-mode\/SKILL\.md`/g, "`.pi/skills/<handle>/<handle>-mode/SKILL.md`"],
 	[/`\.cursor\/skills\/<handle>-mode\/SKILL\.md`/g, "`.pi/skills/<handle>-mode/SKILL.md`"],
 	[/`\.cursor\/skills\/<handle>\/`/g, "`.pi/skills/<handle>/`"],
+	[/~\/\.cursor\/skills\//g, "~/.pi/agent/skills/"],
 	[/\.cursor\/skills\//g, ".pi/skills/"],
 	[
 		/misses one that lives at `\.cursor\/worktrees\/myrepo\/x`/g,
@@ -304,7 +306,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/Every spawn is a Task subagent with `agent: "delegate"` and read-only\./g,
-				'Every spawn is a read-only `subagent` call with `agent: "delegate"`.',
+				'Every spawn is a `subagent` call with `agent: "delegate"`. Pi\'s `delegate` can edit files, so each brief says "do not edit files" and you check `git status` after each returns.',
 			],
 		],
 	},
@@ -313,7 +315,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/Every spawn is `generalPurpose` with agent mode \(agent mode\)\./g,
-				'Every spawn is a `delegate` agent with agent mode.',
+				'Every spawn is a `delegate` agent with agent mode. Pi\'s `delegate` can edit files, so each brief says "do not edit files" and you check `git status` after each returns.',
 			],
 			[/list the available MCPs from the Cursor environment/g, "list the available MCP servers from the Pi environment"],
 			[/inspect the `mcps\/` directory Cursor exposes for enabled MCP servers/g, "inspect the MCP servers the session has registered"],
@@ -351,7 +353,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/Each reviewer gets `agent: "delegate"`, read-only, and `model` set to its configured entry/g,
-				'Each reviewer gets `agent: "delegate"`, a read-only tool set, and `model` set to its configured entry',
+				'Each reviewer gets `agent: "reviewer"`, whose tools are read-only, and `model` set to its configured entry',
 			],
 		],
 	},
@@ -360,7 +362,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/One message, three `subagent` calls, `agent: "delegate"`, agent mode \(agent mode\)\./g,
-				'One message, three `subagent` calls, `agent: "delegate"`, agent mode.',
+				'One message, three `subagent` calls, `agent: "delegate"`, agent mode. Reviewers never edit files, so each brief says so and you check `git status` after they return.',
 			],
 		],
 	},
@@ -387,7 +389,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/Locate the active workspace's transcripts before fanning out\. The system prompt names the workspace's `agent-transcripts\/` directory\. Use only that path\. Don't glob across `~\/\.cursor\/projects\/\*\/`\. That crosses workspace boundaries and reads private chats from unrelated projects\./g,
-				"Locate the active workspace's transcripts before fanning out. Pi keeps them under `~/.pi/agent/sessions/`. Use only the current session's file. That reads private chats from unrelated projects otherwise.",
+				"Locate the active workspace's transcripts before fanning out. Pi keeps them in `~/.pi/agent/sessions/--<cwd>--/`, one JSONL file per session. Use only this workspace's folder, never a sibling folder, because a sibling holds private chats from unrelated projects.",
 			],
 		],
 	},
@@ -396,7 +398,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/A local transcript under the active workspace's `agent-transcripts\/` directory \(the system prompt names the path\. Do not glob across `~\/\.cursor\/projects\/\*\/`, that crosses workspace boundaries and reads private chats from unrelated projects\), a cloud-agent URL, or a pushed branch\./g,
-				"A local transcript in Pi's session directory under `~/.pi/agent/sessions/` (read only the current session's file, that crosses workspace boundaries otherwise), or a pushed branch.",
+				"A local transcript in this workspace's Pi session folder, `~/.pi/agent/sessions/--<cwd>--/` (the Pi adapter gives the folder name), or a pushed branch. Read only that folder, never a sibling folder, because a sibling crosses workspace boundaries and holds private chats from unrelated projects.",
 			],
 		],
 	},
@@ -405,7 +407,7 @@ const FILE_RULES = [
 		rules: [
 			[
 				/Read each candidate's local transcript under the active workspace's `agent-transcripts\/` directory \(the system prompt names this path\)\. Do not glob across `~\/\.cursor\/projects\/\*\/`\. That crosses workspace boundaries and reads private chats from unrelated projects\./g,
-				"Read each candidate's local transcript in Pi's session directory under `~/.pi/agent/sessions/`. Read only the current session's file. That reads private chats from unrelated projects otherwise.",
+				"Read each candidate's local transcript. A subagent's transcript is `subagent-artifacts/<runId>_<agent>_transcript.jsonl` inside this workspace's Pi session folder under `~/.pi/agent/sessions/`. Read only that folder, never a sibling folder, because a sibling holds private chats from unrelated projects.",
 			],
 		],
 	},
@@ -439,6 +441,100 @@ const FILE_RULES = [
 	{
 		match: "skills/maintain-verification-skill/SKILL.md",
 		rules: [
+		],
+	},
+	{
+		match: "skills/reflect/SKILL.md",
+		rules: [[/agent mode \(agent mode\)/g, "agent mode"]],
+	},
+	{
+		match: "skills/poteto-mode/playbooks/orchestrate.md",
+		rules: [
+			[
+				" in the current agent's store (path in the system prompt).",
+				" under `.pi/pstack/` in the working directory and keep it out of git. Pi has no agent store, so export `ORCH_STORE` as that directory's absolute path before any `orch` command.",
+			],
+			["Run `orch init`.", "Export `ORCH_STORE`, then run `orch init`."],
+		],
+	},
+	{
+		match: "skills/poteto-mode/playbooks/autopilot-full.md",
+		rules: [
+			[" in the root agent's store (path in the system prompt)", " under `.pi/pstack/` in the working directory (kept out of git)"],
+			["arm `/loop 1h` to audit", "arm an hourly polling watcher to audit"],
+		],
+	},
+	{
+		match: "skills/poteto-mode/playbooks/multi-phase-plan.md",
+		rules: [
+			["under the agent store's `docs/`", "under `.pi/pstack/docs/`"],
+			["Read these from trunk at program start.", "Read these at program start, the pstack files from the installed package and the rest from trunk."],
+			[/git show origin\/main:pstack\//g, "read <pstack>/"],
+			[/pstack\/skills\//g, "<pstack>/skills/"],
+		],
+	},
+	{
+		match: "skills/make-bot-ui/SKILL.md",
+		rules: [
+			[
+				/^# How to make a bot UI\n/m,
+				"# How to make a bot UI\n\n**Not supported in Pi.** This skill builds on Cursor Automations: `update_state` routines, `SendToUser` secret requests, and the Routines panel. Pi has none of them. Write `Skipped in Pi: create the webhook routine and request the sender key. Cursor Automations do not exist in Pi.` and stop, unless the user brings their own webhook URL and sender key. With those, build the local page and server below and ignore the routine, panel, and secret-card steps.\n",
+			],
+		],
+	},
+	{
+		match: "skills/automate-me/SKILL.md",
+		rules: [
+			[
+				"4-6 options each, `allow_multiple: true` for category questions.",
+				"2-4 options each, `multiSelect: true` for category questions, and split a larger category across questions.",
+			],
+		],
+	},
+	{
+		match: "skills/how/references/explainer-prompt.md",
+		rules: [["Use Read, Grep, and Glob as needed.", "Use `read`, `grep`, and `find` as needed."]],
+	},
+	{
+		match: "skills/interrogate/references/rubric.md",
+		rules: [["(Read, Grep, Glob)", "(`read`, `grep`, `find`)"]],
+	},
+	...["judgment", "tooling", "divergent"].map((name) => ({
+		match: `skills/reflect/references/${name}-reviewer.md`,
+		rules: [
+			["a `Read` of its `SKILL.md`", "a `read` of its `SKILL.md`"],
+			["(Shell, Grep, MCP, etc.)", "(bash, grep, MCP, etc.)"],
+		],
+	})),
+	{
+		match: "docs/guide/01-setup.md",
+		rules: [
+			[
+				"At the end of setup, `/setup-pstack` looks for",
+				"`/setup-pstack` itself only writes the role map. To get the offers below, also run `/skill:setup-pstack`. The skill looks for",
+			],
+			["Then setup offers once", "Then the skill offers once"],
+			["After setup, start a new chat. The model rule applies to new sessions.", "The role map applies to every subagent launched after it is written, so no new chat is needed."],
+			["so the list length sets the panel size.", "so the list length sets the panel size. Each panel has a fixed size of two seats, and a list of another length is dropped."],
+			["- Shorten a panel list. Each entry runs one subagent.\n", ""],
+		],
+	},
+	{
+		match: "docs/guide/05-build-and-clean.md",
+		rules: [["say `deslop it`", "say `unslop the diff`"]],
+	},
+	{
+		match: "docs/guide/07-overnight.md",
+		rules: [
+			["an isolated worktree or cloud agent", "an isolated worktree"],
+			["- Give each body of work its own Project, such as", "- Give each body of work its own worktree and Pi session, such as"],
+			[
+				"- Drag related chats into the Project, finished ones included. They become context for every agent in it.",
+				"- When agents need shared context, put the notes or transcript paths in each brief. Pi sessions do not share context on their own.",
+			],
+			["One prompt can carry a whole Project, from", "One prompt can carry a whole body of work, from"],
+			["pstack ships this as a dormant", "Upstream pstack ships this as a dormant"],
+			["and name the target repository to set it up.", "and name the target repository to set it up. It needs Cursor Automations, which Pi does not have, so skip it in Pi."],
 		],
 	},
 ];
@@ -582,6 +678,7 @@ const CURSOR_TERMS = [
 	/claude-opus-5-5|grok-4\.7/,
 	/cursor-team-kit/,
 	/generalPurpose/,
+	/update_state|SendToUser/,
 ];
 
 /** The skills that already have an H1, which the adapter line is inserted after. */
@@ -599,16 +696,27 @@ function needsAdapter(text) {
  */
 const OVERRIDES_DIR = join(ROOT, "overrides");
 
+/**
+ * The rendered files that upstream ships executable. A skill runs some of its scripts directly,
+ * so a lost execute bit is a broken step that no byte comparison can see.
+ */
+const executable = new Set();
+
 function render() {
 	const files = new Map();
+	const track = (key, path) => {
+		if (statSync(path).mode & 0o111) executable.add(key);
+	};
 
 	for (const path of walk(join(UPSTREAM, "skills"))) {
 		const relativePath = relative(join(UPSTREAM, "skills"), path);
 		files.set(`skills/${relativePath}`, readFileSync(path, "utf8"));
+		track(`skills/${relativePath}`, path);
 	}
 	for (const path of walk(join(UPSTREAM, "agents"))) {
 		const relativePath = relative(join(UPSTREAM, "agents"), path);
 		files.set(`agents/${relativePath}`, readFileSync(path, "utf8"));
+		track(`agents/${relativePath}`, path);
 	}
 	// The guide is prose, so the same term table applies. Its images are binary, so they are
 	// read as bytes and copied without a rewrite.
@@ -616,6 +724,7 @@ function render() {
 		const relativePath = relative(join(UPSTREAM, "docs", "guide"), path);
 		const key = `docs/guide/${relativePath}`;
 		files.set(key, TEXT_EXTENSIONS.has(extname(relativePath)) ? readFileSync(path, "utf8") : readFileSync(path));
+		track(key, path);
 	}
 
 	const rendered = new Map();
@@ -624,6 +733,8 @@ function render() {
 		const override = join(OVERRIDES_DIR, relativePath);
 		if (existsSync(override)) {
 			rendered.set(relativePath, readFileSync(override, "utf8"));
+			if (statSync(override).mode & 0o111) executable.add(relativePath);
+			else executable.delete(relativePath);
 			continue;
 		}
 		// A binary file is copied, not rewritten.
@@ -721,6 +832,8 @@ if (!existsSync(ADAPTER_FILE)) {
  */
 const FORBIDDEN = [
 	{ pattern: /`Task`/, label: "`Task`", except: [] },
+	{ pattern: /Task tool/, label: "Task tool", except: [] },
+	{ pattern: /update_state|SendToUser|api2\.cursor/, label: "Cursor Automations tool", except: ["skills/make-bot-ui/SKILL.md"] },
 	{ pattern: /subagent_type/, label: "subagent_type", except: [] },
 	{ pattern: /generalPurpose/, label: "generalPurpose", except: [] },
 	{ pattern: /AskQuestion/, label: "AskQuestion", except: [] },
@@ -744,7 +857,7 @@ const FORBIDDEN = [
 	// Any other mention of Cursor is a step written for a harness this port does not run in. The
 	// two exceptions name Cursor on purpose: the help skill says this is a port of a Cursor
 	// plugin, and worktree cleanup reclaims the Cursor app's disk space when it is installed.
-	{ pattern: /\bCursor\b/, label: "Cursor", except: ["skills/poteto-help/SKILL.md", "skills/poteto-mode/playbooks/worktree-cleanup.md"] },
+	{ pattern: /\bCursor\b/, label: "Cursor", except: ["skills/poteto-help/SKILL.md", "skills/poteto-mode/playbooks/worktree-cleanup.md", "skills/make-bot-ui/SKILL.md", "docs/guide/07-overnight.md"] },
 ];
 
 /**
@@ -809,7 +922,8 @@ if (process.argv.includes("--check")) {
 			continue;
 		}
 		const want = typeof content === "string" ? Buffer.from(content, "utf8") : content;
-		if (!have.equals(want)) drifted.push(path);
+		const isExecutable = (statSync(outputPath(path)).mode & 0o111) !== 0;
+		if (!have.equals(want) || isExecutable !== executable.has(path)) drifted.push(path);
 	}
 	for (const path of onDisk.keys()) {
 		if (!rendered.has(path)) drifted.push(path);
@@ -828,6 +942,7 @@ if (process.argv.includes("--check")) {
 		const out = outputPath(path);
 		mkdirSync(dirname(out), { recursive: true });
 		writeFileSync(out, content);
+		chmodSync(out, executable.has(path) ? 0o755 : 0o644);
 	}
 	console.log(`ported ${rendered.size} files into skills/, agents/ and docs/guide/`);
 }

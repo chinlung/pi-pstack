@@ -12,7 +12,7 @@ Answer the user's question about pstack, hand them a prompt they can send, and l
 
 A message that asks for work, such as "use pstack to fix this bug", is not a help question. Read [`poteto-mode`](../poteto-mode/SKILL.md), do the work under it, and mention once that `/poteto-mode <task>` starts the next task the same way.
 
-This file maps questions to the skills and guide pages that hold the answers. Those files own the details. Read the file you route to before you quote it, and trust it when it disagrees with this map. The links here point into the installed plugin, which the user may not be able to open, so give the user the file's public copy: `https://github.com/cursor/plugins/blob/main/pstack/` followed by its path.
+This file maps questions to the skills and guide pages that hold the answers. Those files own the details. Read the file you route to before you quote it, and trust it when it disagrees with this map. The links here point into the installed plugin, which the user may not be able to open, so give the user the file's public copy: `https://github.com/chinlung/pi-pstack/blob/main/` followed by its path. The Cursor originals are under `https://github.com/cursor/plugins/blob/main/pstack/`, and they describe a different harness.
 
 ## Find out what they need
 
@@ -37,13 +37,13 @@ When the model rule is missing and it matters, ask whether the user wants to pic
 
 ## Get set up
 
-1. Install with `/add-plugin pstack` in chat, or from Customize in the sidebar.
-2. Run [`/setup-pstack`](../setup-pstack/SKILL.md). It asks for a reasoning budget, maps a model to each role, and writes a rule. The rule applies to new chats. Then it offers once each to generate a verification skill and a formal verification skill for the project, unless the project already has one.
+1. Install with `pi install <path-or-git-url>`.
+2. Run `/setup-pstack`. It asks for a reasoning budget, maps a model to each role, and writes the role map. The map applies to subagents launched after it is written. The command only writes the map. [`/skill:setup-pstack`](../setup-pstack/SKILL.md) also offers once to generate a verification skill and a formal verification skill for the project, unless the project already has one.
 3. Start a real task with `/poteto-mode`, a goal, and a check that can pass or fail.
 
 Installing changes nothing until the user invokes a skill. Only `/setup-pstack` loads from the user's words. The [README](../../README.md) and [guide page 1](../../docs/guide/01-setup.md) have the details. Offer to word their first prompt with them, per [`references/prompting.md`](references/prompting.md).
 
-If cost is the worry, say where the tokens go and how to spend fewer. pstack spends extra tokens on subagents and review panels. Rerun `/setup-pstack` and pick a smaller budget or cheaper models. A role set to `auto` or `inherit-parent` runs on the chat's model, which saves tokens when the chat runs on Auto or a cheaper model. A shorter panel list runs fewer subagents, one for each entry. Save `/poteto-mode` for work that needs rigor.
+If cost is the worry, say where the tokens go and how to spend fewer. pstack spends extra tokens on subagents and review panels. Rerun `/setup-pstack` and pick a smaller budget or cheaper models. A role set to `auto` or `inherit-parent` runs on the chat's model, which saves tokens when the chat runs on Auto or a cheaper model. Save `/poteto-mode` for work that needs rigor.
 
 This is the Pi port of pstack. Upstream pstack is written for Cursor; the [Pi adapter](../../docs/harness/pi.md) maps its names to Pi, and a step that needs a feature Pi lacks, such as Automations, is skipped with a one-line note. Install it with `pi install <path-or-git-url>`.
 
@@ -107,7 +107,7 @@ Close calls:
 
 Not in pstack:
 
-- `unslop` ships with pstack. The other two have no Pi equivalent; drive the surface with the project's own scripts.
+- `unslop` ships with pstack. Upstream's `control-cli` and `control-ui` have no Pi equivalent; drive the surface with the project's own scripts.
 - Upstream's loop command becomes a polling watcher, and `create-skill` becomes Pi's skill format. The [Pi adapter](../../docs/harness/pi.md) maps both.
 - pstack has no `/orchestrate` skill. Orchestrate is a `/poteto-mode` playbook. If the slash menu shows `/orchestrate`, another plugin provides it.
 
@@ -126,7 +126,7 @@ Without `/poteto-mode`, a phrase such as "babysit this pr" does not route to a p
 
 pstack has no planning skill. For work that spans phases or stacked PRs, asking `/poteto-mode` for a plan runs the [Multi-phase plan playbook](../poteto-mode/playbooks/multi-phase-plan.md), which writes the plan and doesn't implement it. For a design question, the Prototype playbook or `/architect` settles it in code first.
 
-Principles are one-rule skills that `/poteto-mode` reads and cites in its replies. The user rarely invokes one. They steer with the names instead, as in "apply prove it works. show me the real output." Typing `/principle-<name>` still loads one on demand. [Guide page 8](../../docs/guide/08-principles.md) lists them.
+Principles are one-rule skills that `/poteto-mode` reads and cites in its replies. The user rarely invokes one. They steer with the names instead, as in "apply prove it works. show me the real output." Typing `/skill:principle-<name>` loads one on demand. [Guide page 8](../../docs/guide/08-principles.md) lists them.
 
 ## Fix a run that went wrong
 

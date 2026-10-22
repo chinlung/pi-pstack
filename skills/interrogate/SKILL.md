@@ -33,7 +33,7 @@ Launch all reviewers in a single message with the `subagent` tool, one per entry
 | Reviewer A | the role map's entry |
 | Reviewer B | the role map's entry |
 
-Each reviewer gets `agent: "delegate"`, a read-only tool set, and `model` set to its configured entry, or its table default when there is no configured line. Omit `model` for an `auto` or `inherit-parent` entry, so that reviewer runs on the parent model.
+Each reviewer gets `agent: "reviewer"`, whose tools are read-only, and `model` set to its configured entry, or its table default when there is no configured line. Omit `model` for an `auto` or `inherit-parent` entry, so that reviewer runs on the parent model.
 
 If the `subagent` tool rejects a configured entry, run that reviewer on its family's table default and say so. A family is the model's vendor lineage (`claude`, `gpt`, `gemini`, …), not its provider, as the Pi adapter defines it, so one model reached through two providers is one family. A rejected entry runs on the same role's other entry. With no family match, use the role map's first entry. If it rejects a table default, spawn with the closest equivalent from the valid slugs in its error message (prefer the same family and reasoning tier), and open a separate PR to update the default table. Do not block the review on the slug issue. Never treat an alias entry as a rejected slug or apply either fallback to it.
 

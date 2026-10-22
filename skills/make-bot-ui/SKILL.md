@@ -8,6 +8,12 @@ disable-model-invocation: true
 ---
 # How to make a bot UI
 
+In Pi, read [the Pi adapter](../../docs/harness/pi.md) once per session before you follow this skill. It maps the Cursor names in pstack skills to Pi.
+
+**Not supported in Pi.** This skill builds on Cursor Automations: `update_state` routines, `SendToUser` secret requests, and the Routines panel. Pi has none of them. Write `Skipped in Pi: create the webhook routine and request the sender key. Cursor Automations do not exist in Pi.` and stop, unless the user brings their own webhook URL and sender key. With those, build the local page and server below and ignore the routine, panel, and secret-card steps.
+
+**Not supported in Pi.** This skill builds on Cursor Automations: `update_state` routines, `SendToUser` secret requests, and the Routines panel. Pi has none of them. Write `Skipped in Pi: create the webhook routine and request the sender key. Cursor Automations do not exist in Pi.` and stop, unless the user brings their own webhook URL and sender key. With those, build the local page and server below and ignore the routine, panel, and secret-card steps.
+
 Build a page the user clicks. A server on this computer POSTs JSON to a webhook routine. The bot wakes with that JSON. Keep the sender key on the server. Do not put the sender key in the browser, in chat, or in this skill.
 
 ## Create the webhook routine
