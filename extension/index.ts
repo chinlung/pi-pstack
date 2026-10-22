@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerRuntimeAgent, type RuntimeRegistration } from "./runtime-agents.ts";
-import { completeRoles, defaultRoleMap, detectModels, normalizeEntry, resolveRoleMap, resolveValue, type CatalogModel, type ResolvedRole, type ResolvedSeat } from "./models.ts";
+import { completeRoles, defaultRoleMap, duplicateModels, detectModels, normalizeEntry, resolveRoleMap, resolveValue, type CatalogModel, type ResolvedRole, type ResolvedSeat } from "./models.ts";
 import { mergeRoleMaps, readRoleMap, writeRoleMap } from "./store.ts";
 import { BUDGET_EFFORT, BUDGETS, isBudget, ROLES, seatsOf, type BudgetLabel, type RoleEntry, type RoleMap } from "./roles.ts";
 
@@ -276,7 +276,10 @@ function formatSeat(seat: ResolvedSeat): string {
 /** Formats a resolved map, one line per role. A role missing from the map runs on the parent. */
 function formatRoleMap(loaded: LoadedMap, resolved: readonly ResolvedRole[]): string[] {
 	const lines = [`budget: ${loaded.map.budget} (${BUDGET_DETAIL[loaded.map.budget]}), source: ${loaded.source}`, ""];
-	for (const entry of resolved) lines.push(`${entry.role}: ${entry.seats.map(formatSeat).join(", ")}`);
+	for (const entry of resolved) {
+		const same = duplicateModels(entry.seats).length > 0 ? " [same model in more than one seat]" : "";
+		lines.push(`${entry.role}: ${entry.seats.map(formatSeat).join(", ")}${same}`);
+	}
 	return lines;
 }
 

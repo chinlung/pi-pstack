@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultRoleMap, levelFor, resolveRoleMap, resolveValue, strengthOf, type CatalogModel } from "../models.ts";
+import { defaultRoleMap, duplicateModels, levelFor, resolveRoleMap, resolveValue, strengthOf, type CatalogModel } from "../models.ts";
 import { familyOf, ROLES, type Effort } from "../roles.ts";
 
 const FULL: readonly Effort[] = ["max", "xhigh", "high", "medium", "low", "minimal", "off"];
@@ -151,4 +151,11 @@ test("a resolved role carries the launch spec with the budget's level", () => {
 		},
 		{ kind: "parent" },
 	]);
+});
+
+test("a panel that seats one model twice is reported, a parent seat is not a model", () => {
+	const seat = (id: string) => ({ kind: "model" as const, id, spec: id, level: undefined, aboveBudget: false });
+	assert.deepEqual(duplicateModels([seat("a/x"), seat("a/x")]), ["a/x"]);
+	assert.deepEqual(duplicateModels([seat("a/x"), seat("b/y")]), []);
+	assert.deepEqual(duplicateModels([{ kind: "parent" }, { kind: "parent" }]), []);
 });

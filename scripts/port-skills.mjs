@@ -519,6 +519,10 @@ const FILE_RULES = [
 			["- Shorten a panel list. Each entry runs one subagent.\n", ""],
 		],
 	},
+	...["docs/guide/07-overnight.md", "skills/poteto-help/references/recipes.md"].map((match) => ({
+		match,
+		rules: [["/loop until done.", "keep a polling watcher running until done."]],
+	})),
 	{
 		match: "docs/guide/05-build-and-clean.md",
 		rules: [["say `deslop it`", "say `unslop the diff`"]],
@@ -855,8 +859,9 @@ const FORBIDDEN = [
 	{ pattern: /cursor\.com/, label: "cursor.com", except: [] },
 	{ pattern: /Custom Mode/, label: "Custom Mode", except: [] },
 	// Any other mention of Cursor is a step written for a harness this port does not run in. The
-	// two exceptions name Cursor on purpose: the help skill says this is a port of a Cursor
-	// plugin, and worktree cleanup reclaims the Cursor app's disk space when it is installed.
+	// exceptions name Cursor on purpose: the help skill says this is a port of a Cursor plugin,
+	// worktree cleanup reclaims the Cursor app's disk space, and the unsupported-in-Pi notices
+	// (make-bot-ui, the guide's automation pack) say which Cursor feature is missing.
 	{ pattern: /\bCursor\b/, label: "Cursor", except: ["skills/poteto-help/SKILL.md", "skills/poteto-mode/playbooks/worktree-cleanup.md", "skills/make-bot-ui/SKILL.md", "docs/guide/07-overnight.md"] },
 ];
 

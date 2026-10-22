@@ -241,6 +241,12 @@ export function completeRoles(resolved: readonly ResolvedRole[]): ResolvedRole[]
 	);
 }
 
+/** The model ids that more than one seat of a role names, so setup can say a panel is one model twice. */
+export function duplicateModels(seats: readonly ResolvedSeat[]): string[] {
+	const ids = seats.flatMap((seat) => (seat.kind === "model" ? [seat.id] : []));
+	return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+}
+
 /** One seat of a resolved role, ready to launch. */
 export type ResolvedSeat =
 	| {
