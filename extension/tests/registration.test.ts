@@ -107,7 +107,11 @@ test("the package manifest declares no agent files that would collide with the r
 
 test("the extension registers its commands and its read-only tool", async () => {
 	const { commands, tools } = await load();
-	assert.deepEqual([...commands.keys()].sort(), ["poteto-mode", "pstack-models", "setup-pstack"]);
+	const names = [...commands.keys()];
+	for (const own of ["poteto-mode", "pstack-models", "setup-pstack"]) assert.ok(names.includes(own), own);
+	// Upstream's examples type these short forms.
+	for (const alias of ["how", "tdd", "automate-me", "poteto-help"]) assert.ok(names.includes(alias), alias);
+	assert.ok(!names.some((name) => name.startsWith("principle-")));
 	const tool = tools.get("pstack_models");
 	assert.ok(tool?.outputSchema, "pstack_models declares an output schema");
 	assert.deepEqual(tool?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
@@ -149,4 +153,26 @@ test("pstack_models returns one parent seat per seat for a panel role missing fr
 	const result = await tool.execute("id", { role: "arena runners" }, undefined, undefined, ctx);
 	assert.deepEqual(result.structuredContent.roles, [{ role: "arena runners", seats: [{ kind: "parent" }, { kind: "parent" }] }]);
 	await assert.rejects(tool.execute("id", { role: "no such role" }, undefined, undefined, ctx), /unknown pstack role/);
+});
+
+test("a skill alias sends the long form, with and without arguments", async () => {
+	const { commands, sent } = await load();
+	const ctx = { hasUI: true, isIdle: () => true, ui: { notify() {} } };
+	await commands.get("how")?.handler("does the cache expire?", ctx);
+	await commands.get("poteto-help")?.handler("", ctx);
+	assert.deepEqual(
+		sent.map((message) => message.content),
+		["/skill:how does the cache expire?", "/skill:poteto-help"],
+	);
+});
+
+test("pstack_models without a role returns every role, parents included, and carries warnings in its text", async () => {
+	process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-pstack-"));
+	const { tools } = await load();
+	const tool = tools.get("pstack_models") as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; structuredContent: { roles: Array<{ role: string; seats: unknown[] }> } }> };
+	const ctx = { scopedModels: [], modelRegistry: { getAvailable: () => [], hasConfiguredAuth: () => false } };
+	const result = await tool.execute("id", {}, undefined, undefined, ctx);
+	assert.equal(result.structuredContent.roles.length, 17);
+	assert.deepEqual(result.structuredContent.roles.find((entry) => entry.role === "interrogate reviewers")?.seats, [{ kind: "parent" }, { kind: "parent" }]);
+	assert.match(result.content[0].text, /interrogate reviewers: parent model, parent model/);
 });

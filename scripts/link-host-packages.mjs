@@ -5,7 +5,8 @@
  *
  * Pi supplies these packages to extensions at runtime and they must not be installed as
  * dependencies, so a plain `node --test` or `tsc` run cannot resolve them. The links point at
- * the release the installed Pi actually runs, which `~/.pi/agent/PI_VERSION` names.
+ * the release the installed Pi actually runs. The launcher at `~/.pi/agent/bin/pi` reads
+ * `install/current-version`; `PI_VERSION` is only the fallback, because it can lag behind.
  *
  * Run it from the package root (`npm test` and `npm run typecheck` run it first):
  *
@@ -26,17 +27,18 @@ function agentDir() {
 }
 
 /**
- * The release directory the installed Pi runs. `PI_VERSION` is the authority: picking the
+ * The release directory the installed Pi runs. A version file is the authority: picking the
  * newest folder by name would sort `1.10.0` before `1.9.0`.
  */
 function releaseDir() {
-	const versionFile = join(agentDir(), "PI_VERSION");
+	const current = join(agentDir(), "install", "current-version");
+	const versionFile = existsSync(current) ? current : join(agentDir(), "PI_VERSION");
 	if (!existsSync(versionFile)) {
-		throw new Error(`cannot find ${versionFile}; is Pi installed for this user?`);
+		throw new Error(`cannot find ${current} or PI_VERSION; is Pi installed for this user?`);
 	}
 	const version = readFileSync(versionFile, "utf8").trim();
 	const dir = join(agentDir(), "install", "releases", version);
-	if (!existsSync(dir)) throw new Error(`PI_VERSION names ${version}, but ${dir} does not exist`);
+	if (!existsSync(dir)) throw new Error(`${versionFile} names ${version}, but ${dir} does not exist`);
 	return dir;
 }
 

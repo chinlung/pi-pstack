@@ -227,6 +227,20 @@ export function resolveValue(models: readonly CatalogModel[], value: RoleValue):
 	return { kind: "unresolved", value };
 }
 
+/**
+ * Every role in the table, in table order. A role the map does not name runs on the parent
+ * model, one parent seat per seat of the role so a panel keeps its fan-out.
+ */
+export function completeRoles(resolved: readonly ResolvedRole[]): ResolvedRole[] {
+	return ROLES.map(
+		(spec) =>
+			resolved.find((entry) => entry.role === spec.name) ?? {
+				role: spec.name,
+				seats: Array.from({ length: spec.seats }, () => ({ kind: "parent" as const })),
+			},
+	);
+}
+
 /** One seat of a resolved role, ready to launch. */
 export type ResolvedSeat =
 	| {

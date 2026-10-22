@@ -11,14 +11,15 @@
  * 3. `/poteto-mode <task>`, a shortcut for `/skill:poteto-mode <task>`.
  */
 import { readFile } from "node:fs/promises";
+import { readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerRuntimeAgent, type RuntimeRegistration } from "./runtime-agents.ts";
-import { defaultRoleMap, detectModels, normalizeEntry, resolveRoleMap, type CatalogModel, type ResolvedRole, type ResolvedSeat } from "./models.ts";
+import { completeRoles, defaultRoleMap, detectModels, normalizeEntry, resolveRoleMap, resolveValue, type CatalogModel, type ResolvedRole, type ResolvedSeat } from "./models.ts";
 import { mergeRoleMaps, readRoleMap, writeRoleMap } from "./store.ts";
-import { BUDGET_EFFORT, BUDGETS, isBudget, ROLES, type BudgetLabel, type RoleEntry, type RoleMap } from "./roles.ts";
+import { BUDGET_EFFORT, BUDGETS, isBudget, ROLES, seatsOf, type BudgetLabel, type RoleEntry, type RoleMap } from "./roles.ts";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SKILLS_DIR = join(PACKAGE_ROOT, "skills");
@@ -142,6 +143,22 @@ export default async function piPstack(pi: ExtensionAPI): Promise<void> {
 		},
 	});
 
+	// Upstream's examples type `/how`, `/tdd` and the like. Pi expands only `/skill:<name>`, so each
+	// skill gets a command of its own name that sends the long form. Principles stay long-form.
+	for (const name of listAliasSkills()) {
+		pi.registerCommand(name, {
+			description: `Run the ${name} skill (same as /skill:${name})`,
+			handler: async (args, ctx) => {
+				if (!ctx.isIdle()) {
+					report(ctx, `${name}: the agent is busy. Wait for it to finish, then run the command again.`, "warning");
+					return;
+				}
+				const task = args.trim();
+				pi.sendUserMessage(task ? `/skill:${name} ${task}` : `/skill:${name}`, { expandPromptTemplates: true });
+			},
+		});
+	}
+
 	pi.registerCommand("setup-pstack", {
 		description: "Choose which model pstack uses per role, and at what reasoning budget",
 		getArgumentCompletions: (prefix) =>
@@ -157,7 +174,7 @@ export default async function piPstack(pi: ExtensionAPI): Promise<void> {
 			const models = detectModels(ctx);
 			const loaded = await loadRoleMap(models);
 			for (const warning of loaded.warnings) report(ctx, `pstack-models: ${warning}`, "warning");
-			report(ctx, formatRoleMap(loaded, resolveRoleMap(models, loaded.map)).join("\n"));
+			report(ctx, formatRoleMap(loaded, completeRoles(resolveRoleMap(models, loaded.map))).join("\n"));
 		},
 	});
 
@@ -181,19 +198,14 @@ export default async function piPstack(pi: ExtensionAPI): Promise<void> {
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const models = detectModels(ctx);
 			const loaded = await loadRoleMap(models);
-			let roles = resolveRoleMap(models, loaded.map);
+			// A role missing from the map has no stored or default model, so it gets parent seats.
+			let roles = completeRoles(resolveRoleMap(models, loaded.map));
 			if (params.role !== undefined) {
 				if (!ROLES.some((role) => role.name === params.role)) {
 					const names = ROLES.map((role) => role.name).join(", ");
 					throw new Error(`unknown pstack role "${params.role}". Roles: ${names}`);
 				}
-				// A known role missing from the map has no stored or default model.
 				roles = roles.filter((entry) => entry.role === params.role);
-				if (roles.length === 0) {
-					// One parent seat per seat of the role, so a panel keeps its fan-out.
-					const seats = ROLES.find((role) => role.name === params.role)?.seats ?? 1;
-					roles = [{ role: params.role, seats: Array.from({ length: seats }, () => ({ kind: "parent" as const })) }];
-				}
 			}
 			const result = {
 				budget: loaded.map.budget,
@@ -203,12 +215,22 @@ export default async function piPstack(pi: ExtensionAPI): Promise<void> {
 				warnings: [...loaded.warnings],
 			};
 			return {
-				content: [{ type: "text", text: formatRoleMap(loaded, roles).join("\n") }],
+				content: [{ type: "text", text: [...loaded.warnings.map((warning) => `warning: ${warning}`), ...formatRoleMap(loaded, roles)].join("\n") }],
 				details: undefined,
 				structuredContent: result,
 			};
 		},
 	});
+}
+
+/** The skills that get a short command: every skill but the principles and the three real commands. */
+function listAliasSkills(): string[] {
+	const own = new Set(["poteto-mode", "setup-pstack", "pstack-models"]);
+	return readdirSync(SKILLS_DIR, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory() && !entry.name.startsWith("principle-") && !own.has(entry.name))
+		.filter((entry) => existsSync(skillPath(entry.name)))
+		.map((entry) => entry.name)
+		.sort();
 }
 
 /** A seat as plain JSON for the tool's structured result. */
@@ -278,6 +300,15 @@ async function runSetup(
 	}
 	const stored = await readRoleMap();
 	for (const warning of stored.warnings) report(ctx, `setup-pstack: ${warning}`, "warning");
+
+	for (const [role, entry] of Object.entries(stored.map?.roles ?? {})) {
+		for (const value of seatsOf(entry)) {
+			const resolved = resolveValue(models, value);
+			if (resolved.kind === "model" && resolved.strippedSuffix) {
+				report(ctx, `setup-pstack: "${role}" named ${value}; the :${resolved.strippedSuffix} suffix is ignored because the budget sets the level`, "warning");
+			}
+		}
+	}
 
 	const budget = isBudget(requested) ? requested : await askBudget(ctx, stored.map?.budget ?? "large");
 	if (!budget) {

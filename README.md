@@ -25,7 +25,7 @@ pi -e .
 - `/pstack-models` — 檢視目前的角色對應表。
 - `pstack_models` tool — 給模型用的唯讀版本。slash command 只有使用者能打，模型要查某個角色該用哪個模型，靠的是這個 tool。
 - `poteto-agent` 與 `comment-sicko` 兩個 subagent。
-- 56 個 skill（含 24 個 `principle-*`），用 `/skill:<name>` 呼叫。其中 55 個設了 `disable-model-invocation: true`，Pi 不會把它們列進模型的 skill 清單，只能由使用者用 `/skill:<name>` 叫出，或由正在讀的 skill 依路徑讀取。
+- 56 個 skill（含 24 個 `principle-*`），用 `/skill:<name>` 呼叫。extension 另為其中 30 個非 `principle-*` 的 skill 註冊同名的短指令（`/how`、`/tdd` 等，等同 `/skill:<name>`），所以上游指南裡的範例照打即可；`principle-*` 仍要用 `/skill:principle-<name>`。其中 55 個設了 `disable-model-invocation: true`，Pi 不會把它們列進模型的 skill 清單，只能由使用者用 `/skill:<name>` 叫出，或由正在讀的 skill 依路徑讀取。
 
 ## 快速開始
 
@@ -84,7 +84,7 @@ pi -e . --mode rpc
 - **family 是模型的血統，不是 provider**：`claude`、`gpt`、`gemini`、`grok`、`deepseek`、`glm`、`qwen` 等。`anthropic/claude-sonnet-5-5` 與 `amazon-bedrock/global.anthropic.claude-sonnet-5-5` 是同一個模型經兩個 provider 提供，屬於同一個 family。以 provider 當 family 會讓 panel 拿到「同一個模型的兩份」，等於沒有第二意見。
 - 重跑 `/setup-pstack` 會保留你之前手動設的角色（只要模型仍可用），只重新解析缺少的角色和模型已消失的角色。panel 角色整組保留或整組重解，避免 entry 數與 family 分布被打亂；已退役的角色名稱會被移除並列在報告裡。
 - 手寫角色表時寫成 `provider/id:xhigh` 也可以：讀取時會拿掉合法的 level suffix 並回報，level 一律由預算決定。只有在完整字串本身不是 catalog id 時才拿掉，因為有些 id 本身就含冒號。
-- 模型查角色時呼叫 `pstack_models` tool；沒有角色表、或表裡沒有該角色時，子代理直接用目前對話的模型，並在回覆裡說一聲，不自己編 slug。
+- 模型查角色時呼叫 `pstack_models` tool。有 tool、沒有角色表時，回傳由偵測到的模型解析出的預設值（`source: default`）；沒有 tool 或指定的角色不在表裡時，子代理直接用目前對話的模型，並在回覆裡說一聲，不自己編 slug。省略 `role` 時 tool 回傳全部 17 個角色，缺的角色以 parent 席位補上。
 
 ```bash
 /pstack-models          # 看現在長什麼樣
@@ -140,7 +140,7 @@ npm run check:skills # 確認生成產物是最新的
 
 有一個刻意保留的例外：multi-phase plan 樣板裡的 `` `/loop 1h` ``。`scripts/check-plan.mjs` 拿它當必要標記驗證計畫，替換掉會讓每份照樣板寫的計畫都檢查失敗。Pi 端的意思由 `docs/harness/pi.md` 的 `/loop` 那一列說明（改用每小時一次的 polling watcher）。
 
-`upstream/` 保持上游原樣，`overrides/` 放的是機械式移植做不到的檔案。目前只有 `setup-pstack`：上游那一版的每一步都是 Cursor 專屬的（寫 always-applied rule、從 Cursor 偵測模型），所以是整份重寫，不是改寫。
+`upstream/` 保持上游原樣，`overrides/` 放的是機械式移植做不到的檔案。目前有 `setup-pstack` 與 `poteto-help`。`setup-pstack` 上游那一版的每一步都是 Cursor 專屬的（寫 always-applied rule、從 Cursor 偵測模型），所以是整份重寫，不是改寫。
 
 ## 與上游同步
 
