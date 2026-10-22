@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 # Show me your work
 
+In Pi, read [the Pi adapter](../../docs/harness/pi.md) once per session before you follow this skill. It maps the Cursor names in pstack skills to Pi.
+
 Keep one canonical log.
 
 ## The format

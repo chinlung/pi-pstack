@@ -23,7 +23,7 @@ pi -e .
 - `/poteto-mode` — 主入口。給它一個任務，它挑 playbook、照著步驟走。
 - `/setup-pstack` — 設定每個角色用哪個模型、推理預算多高。
 - `/pstack-models` — 檢視目前的角色對應表。
-- `pstack_models` tool — 給模型用的唯讀版本（尚未實作，見實作待辦 4）。slash command 只有使用者能打，模型要查某個角色該用哪個模型，靠的是這個 tool。
+- `pstack_models` tool — 給模型用的唯讀版本。slash command 只有使用者能打，模型要查某個角色該用哪個模型，靠的是這個 tool。
 - `poteto-agent` 與 `comment-sicko` 兩個 subagent。
 - 56 個 skill（含 24 個 `principle-*`），用 `/skill:<name>` 呼叫。其中 55 個設了 `disable-model-invocation: true`，Pi 不會把它們列進模型的 skill 清單，只能由使用者用 `/skill:<name>` 叫出，或由正在讀的 skill 依路徑讀取。
 
@@ -40,7 +40,7 @@ pi -e .
 
 你不需要指名 playbook 或列出 skill。「先重現」加上一個可檢查的結果，就是 `/poteto-mode` 需要的全部路由訊號。它會對應到 Bug fix playbook，把步驟複製進 checklist，並在每個步驟 fire 時叫出對應的 skill。
 
-`/poteto-mode <task>` 應等同於送出 `/skill:poteto-mode <task>`（尚未實作，見實作待辦 3）：它把 `poteto-mode` skill 的全文連同絕對路徑交給模型，再接上你的任務。`poteto-mode` 被隱藏在 skill 清單外，所以不能只叫模型「去讀 poteto-mode skill」——模型在清單裡找不到它。
+`/poteto-mode <task>` 等同於送出 `/skill:poteto-mode <task>`：它把 `poteto-mode` skill 的全文連同絕對路徑交給模型，再接上你的任務。`poteto-mode` 被隱藏在 skill 清單外，所以不能只叫模型「去讀 poteto-mode skill」——模型在清單裡找不到它。
 
 ### 在互動 session 裡用
 
@@ -121,17 +121,22 @@ scripts/            移植與檢查腳本
 ## 開發
 
 ```bash
-npm run link:host    # 把 host 的 pi-coding-agent 連到 node_modules，測試需要
-npm run typecheck   # tsc，strict
-npm test            # node --test
+npm install          # 開發依賴：typescript、@types/node
+npm run check        # typecheck + test + check:skills，提交前跑這個
+npm run typecheck    # tsc，strict
+npm test             # node --test
 npm run port:skills  # 重新產生 skills/、agents/、docs/guide/
 npm run check:skills # 確認生成產物是最新的
 ```
 
-`port:skills` 會做兩件事：
+`typecheck` 與 `test` 會先跑 `scripts/link-host-packages.mjs`，把 Pi 提供給 extension 的套件（`@earendil-works/pi-coding-agent`、`typebox`）從 `~/.pi/agent/PI_VERSION` 指定的版本連進 `node_modules`，並連入 `~/.pi/agent/npm` 下安裝的 `pi-subagents`，讓測試用它真正的 runtime agent registry 驗證兩個 agent 的定義。這些套件由 Pi 在執行時提供，不能列為 dependency；`npm install` 會清掉這些連結，所以每次都重建。
+
+`port:skills` 會做四件事：
 
 1. 套用 Cursor → Pi 的名稱替換表。**全域替換表只套用在 `.md`**。程式檔（`.ts`、`.mjs`、`.sh`）逐字複製，因為把散文替換套在程式碼上會弄壞識別字——上游的 `watch-pr` 有一行是拿 review bot 的登入名比對，替換掉就壞了。程式檔裡真的需要改的地方，只能用針對單一檔案的規則明確指定，例如 `worktree-audit.sh` 的 transcript 路徑。
-2. 驗證沒有 Cursor 名稱殘留。殘留的名稱會讓 port 直接失敗，因為那是靜默的行為差異：模型讀到一個 Pi 裡不存在的名字，會自己猜一個或跳過那一步。
+2. 驗證沒有 Cursor 名稱殘留。殘留的名稱會讓 port 直接失敗，因為那是靜默的行為差異：模型讀到一個 Pi 裡不存在的名字，會自己猜一個或跳過那一步。`Cursor` 這個字本身也是禁字，只有 `poteto-help`（說明這是 Cursor plugin 的移植版）與 `worktree-cleanup`（清理 Cursor 程式本身的磁碟空間）例外。
+3. 每條替換規則都必須至少改到一個檔案，否則 port 失敗。上游改了文字、或前面的規則先改掉了它，這條規則就已經不做它作者以為的事；不檢查的話，它會安靜地失效。
+4. 相對連結（inline 連結、圖片、reference-style 定義、`<…>` 包起來的目標）都必須指向這次 port 會產出、或套件根目錄手寫的檔案；生成目錄裡即將被刪除的舊檔不算。指向上游有、但沒移植的部分（目前只有 `automations/`）會改寫成上游的 GitHub 網址；其他找不到的目標都是拼錯或搬走的檔案，port 直接失敗，避免把讀者帶到一個 404。
 
 有一個刻意保留的例外：multi-phase plan 樣板裡的 `` `/loop 1h` ``。`scripts/check-plan.mjs` 拿它當必要標記驗證計畫，替換掉會讓每份照樣板寫的計畫都檢查失敗。Pi 端的意思由 `docs/harness/pi.md` 的 `/loop` 那一列說明（改用每小時一次的 polling watcher）。
 
@@ -151,35 +156,9 @@ npm run check:skills
 
 `poteto-agent` 與 `comment-sicko` 只由 extension 在 session start 註冊成 pi-subagents runtime agent。其他地方都不能有同名的 agent：`package.json` 的 `pi.subagents.agents`、`~/.pi/agent/agents/`、專案的 `.pi/agents/` 都不行。pi-subagents 註冊時不檢查撞名，而是在每次 launch 合併 agent 清單時才檢查，撞名就丟錯，結果是**每一次** subagent launch 的 agent discovery 都失敗，不只這兩個名字。
 
-兩個 agent 的工具組要對得上它們的 prompt：`poteto-agent` 能改檔，也能再派子代理，因為 Feature playbook 要 code-coupled 工作的負責人在內部展開；`comment-sicko` 只回報不改檔，但要能派子代理，因為它的 prompt 會對可疑註解跑 **how** 與 **why** skill，而這兩個 skill 都會展開。runtime agent 定義無法限制子代理能用哪些 agent，所以子代理不改檔只靠 brief 約束，派它出去的上層要在事後檢查 `git status`（見實作待辦 18）。巢狀深度仍受 pi-subagents 的上限約束。
+兩個 agent 的工具組要對得上它們的 prompt：`poteto-agent` 能改檔，也能再派子代理，因為 Feature playbook 要 code-coupled 工作的負責人在內部展開；`comment-sicko` 只回報不改檔，但要能派子代理，因為它的 prompt 會對可疑註解跑 **how** 與 **why** skill，而這兩個 skill 都會展開。runtime agent 定義不接受 `allowedAgents`，無法限制子代理能用哪些 agent，而 how／why 派的是能改檔的 `delegate`，所以子代理不改檔只靠 brief 約束；`comment-sicko` 沒有 `bash`，由派它出去的上層（**no-comments** skill 的執行者）在它回報後檢查 `git status`。巢狀深度受 pi-subagents 從根 session 算起的絕對上限約束，預設是 2：兩個 agent 只有在主 session 派出時才能再展開；由 `poteto-agent` 再派出的 `comment-sicko` 已在深度 2，不能展開，這時它直接讀程式碼判斷，並在報告裡說明沒有跑 how／why。不要設 `maxSubagentDepth: 1`，那會讓從主 session 派出的 `comment-sicko` 完全不能展開。
 
-選 runtime 註冊而不是 package 檔案，是因為註冊時能把 `skills/poteto-mode/SKILL.md` 的絕對路徑寫進 prompt。`poteto-mode` 被隱藏在 skill 清單外，`inheritSkills` 也不會把隱藏的 skill 帶給子代理，所以子代理只能靠這個路徑找到它。上游 frontmatter 的 `is_background: true` 對應到 runtime 定義的 `defaultAsync: true`。
-
-## 實作待辦（spec 與程式碼目前的落差）
-
-這一節是本份 spec 要求、但程式碼還沒做到的部分。逐項完成後，從這裡刪掉。
-
-1. **移除 `package.json` 的 `pi.subagents.agents`。** 它與 runtime 註冊撞名，會讓 agent discovery 失敗（已用 pi-subagents 的 `mergeRuntimeAgents` 實測會丟錯）。
-2. **runtime agent 定義補上欄位。** prompt 前面加上 `skills/poteto-mode/SKILL.md` 的絕對路徑（`extension/index.ts` 裡的 `SKILLS_DIR` 目前沒被用到）；`poteto-agent` 加 `defaultAsync: true`。
-3. **`/poteto-mode` 改送 `/skill:poteto-mode <task>`**，並設 `expandPromptTemplates: true`，讓 Pi 把隱藏的 skill 連同絕對路徑內嵌進去，取代現在只說「去讀 poteto-mode skill」的 `POTETO_PROMPT`。
-4. **註冊唯讀的 `pstack_models` tool。** 傳入角色名稱（可省略，省略時回傳全部角色），回傳 `budget`、`source`（`stored` 或 `default`），以及每個模型的項目：已套上預算 level 的模型與 `aboveBudget` 標記，alias 回傳 `parent`；panel 角色每個席位一項。沒有角色表檔案時照樣回答，`source` 為 `default`，內容是由偵測到的模型解析出的預設值。宣告 `outputSchema` 並回傳 `structuredContent`，讓 codemode 腳本拿到結構化資料。它與 `/pstack-models` 共用同一套解析邏輯。
-5. **`scopedModels` 為空時改用 registry 裡已驗證的模型。** 目前 `listModels` 只讀 `ctx.scopedModels`，沒設 `enabledModels` 的使用者跑 `/setup-pstack` 會得到「找不到模型」。
-6. **panel 多樣性優先於判斷類的「挑最強」。** 目前判斷類 panel 角色的每個 entry 都取全域最強模型，實測得到 `architect runners: X, X`、`interrogate reviewers: X, X`。應先依 entry 分 family，再在該 family 內挑。
-7. **`/setup-pstack` 讓使用者逐一確認或修改角色**（有 UI 時用 dialog），而不只選預算。
-8. **`/setup-pstack <不認得的預算>` 要報錯並列出四個合法值**，目前會當成「cancelled」。
-9. **port 的全域替換表只套用 `.md`。** 目前 `PROSE_EXTENSIONS` 也包含 `.sh` 與 `.mjs`；`worktree-audit.sh` 的路徑改寫要改由單檔規則完成，而單檔規則要能作用在程式檔上。
-10. **修正 `overrides/skills/setup-pstack/SKILL.md` 的範例 JSON。** 它把角色值寫成 `"provider/id:xhigh"`。讀取端會容忍並拿掉這個 suffix（待辦 14），但範例應該示範標準寫法：角色值不帶 suffix，level 由 `budget` 決定。改完要重跑 `npm run port:skills`。
-11. **`scripts/link-host-packages.mjs` 不再用字串排序挑最新版本**（`1.10.0` 會排在 `1.9.0` 前面），改讀 `~/.pi/agent/PI_VERSION`。`extension/tsconfig.json` 寫死的 `install/releases/1.3.0` 路徑也要跟著改成由同一來源產生，否則 Pi 升級後 typecheck 會指向不存在的目錄。
-12. **`report()` 的註解與行為。** 它寫 `process.stdout`，但 Pi 的 print 模式把 `process.stdout` 導到 stderr，所以註解「print run 從 stdout 讀結果」是錯的。extension 拿不到 Pi 內部的 raw stdout，結論是：註解改成實際行為（輸出在 stderr），不要假裝能寫 stdout。
-13. **`mergeRoleMaps` 要丟掉已退役的角色名稱並回報**，目前會原樣保留不在角色清單裡的名稱。
-14. **讀取角色表時拿掉合法的 `:level` suffix**（條件見上方模型路由），並回報。
-15. **補 `devDependencies`。** `npm run typecheck` 呼叫的 `tsc` 目前靠全域安裝；應加上 `typescript` 與 `@types/node`，讓 tsconfig 不必用寫死的 `typeRoots` 去借 Pi 安裝目錄裡的型別。
-16. **`familyOf` 改用模型血統。** 目前 `extension/roles.ts` 的 `familyOf` 對 `provider/id` 直接回傳 provider（第 107 行的 `head.includes("/")` 永遠不成立），實測 `arena runners` 得到 `amazon-bedrock/global.anthropic.claude-sonnet-5-5` 與 `anthropic/claude-sonnet-5-5`，也就是同一個模型。應依 `docs/harness/pi.md` 的定義從 model id 讀出血統。
-17. **port 替換文字裡的「family is the provider prefix」改掉。** `scripts/port-skills.mjs` 把這句寫進 `arena` 與 `interrogate` 等 skill，與 family 的定義相反。改成指向 `docs/harness/pi.md` 的定義，並重跑 `npm run port:skills`。
-18. **runtime agent 的工具組。** 兩者都設 `allowNestedSubagents: true`（pi-subagents：`tools` 含 `subagent` 或 `allowNestedSubagents: true` 擇一即可授權巢狀派發）。runtime agent 定義**不接受** `allowedAgents`（不在 pi-subagents runtime 定義允許的欄位裡，傳了會在註冊時以 unknown field 丟錯），所以無法限制 `comment-sicko` 只派唯讀的 agent；**how**／**why** 派的又是能改檔的 `delegate`。因此唯讀只靠 brief 寫明「不要改檔」，加上派 `comment-sicko` 的上層（**no-comments** skill 的執行者）在它回報後檢查 `git status`，因為 `comment-sicko` 自己沒有 `bash`。這是已知的殘餘風險。**不要**設 `maxSubagentDepth: 1`：pi-subagents 的深度是從根 session 算起的絕對上限，從主 session 派出的 `comment-sicko` 自己就在深度 1，設 1 會讓它完全不能展開。預設上限是 2，所以展開只在它們由主 session 派出時可行；由 `poteto-agent`（深度 1）再派出的 `comment-sicko` 已在深度 2，不能再展開，這時它改為直接讀程式碼判斷，並在報告裡註明沒有跑 how／why。目前兩者都不能巢狀派發，prompt 要求的展開做不到。
-19. **`strongest()` 與 `capable()` 要比對「預算內最高的 level」，不是「最高的 level」。** 目前兩者都用 `strongestDeclaredLevel` 取模型宣告的最高 level 再跟預算比，所以在 `unlimited` 以外的預算下，凡是宣告到 `max` 的模型（多數強模型都是 `off` 到 `max` 全套）一律被排除，判斷類角色因此落到較弱、只宣告到預算以下的模型，或退回 `models[0]`。應改成：取模型宣告的 level 中不超過預算的最高者當強度；完全沒有預算內 level 的模型排在所有有的模型之後。實測 `/setup-pstack medium` 曾把 `judgment and prose` 解析成 `openrouter/z-ai/glm-5.3`：本機每個模型都宣告到 `max`，全部被排除，結果退回 `models[0]`，而 `glm-5.3` 只是剛好排在 `enabledModels` 第一個。
-20. **刪掉 Cursor 時代的 slug 推理工具。** Pi 的 model id 不帶 effort token，`effortOf` 對每個 Pi id 都回傳 `undefined`（已實測），所以 `nearestAtOrBelow` 把每個候選都當成 `off`，實際上只是回傳 provider 群組裡的第一個模型；`resolveDefault` 與 `resolveRoleValue` 都依賴它。`effortOf`、`withEffort`、`applyBudget`、`nearestAtOrBelow` 一併刪除，同 family 的退路改用 strength 規則（待辦 19）與 `familyOf`（待辦 16）。另外 `availableFamilies`、`familyFallback`、`CODE_ROLES`、`JUDGMENT_ROLE`、`HARDEST_ROLE` 沒有任何呼叫點，`singleValue`、`panelValues` 只有測試在用；沒有用途的刪掉，`pstack_models` tool 要用到的留下並接上。
-21. **程式碼註解裡殘留的 `/pstack-setup`**（`extension/index.ts` 開頭註解、`scripts/port-skills.mjs` 註解）改成 `/setup-pstack`。
+選 runtime 註冊而不是 package 檔案，是因為註冊時能把 skill 的絕對路徑寫進 prompt：`poteto-agent` 拿到 `poteto-mode`，`comment-sicko` 拿到 `how` 與 `why`。`poteto-mode` 被隱藏在 skill 清單外，`inheritSkills` 也不會把隱藏的 skill 帶給子代理，所以子代理只能靠這個路徑找到它。上游 frontmatter 的 `is_background: true` 對應到 runtime 定義的 `defaultAsync: true`。
 
 ## 授權
 

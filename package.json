@@ -26,19 +26,17 @@
 		],
 		"skills": [
 			"./skills"
-		],
-		"subagents": {
-			"agents": [
-				"./agents"
-			]
-		}
+		]
 	},
 	"scripts": {
+		"pretypecheck": "node scripts/link-host-packages.mjs",
 		"typecheck": "tsc --project extension/tsconfig.json --noEmit",
-		"test": "node --experimental-strip-types --test extension/tests/*.test.ts",
+		"pretest": "node scripts/link-host-packages.mjs",
+		"test": "node --experimental-strip-types --test extension/tests/*.test.ts scripts/tests/*.test.mjs",
 		"link:host": "node scripts/link-host-packages.mjs",
 		"port:skills": "node scripts/port-skills.mjs",
-		"check:skills": "node scripts/port-skills.mjs --check"
+		"check:skills": "node scripts/port-skills.mjs --check",
+		"check": "npm run typecheck && npm test && npm run check:skills"
 	},
 	"files": [
 		"extension",
@@ -52,11 +50,19 @@
 		"README.md"
 	],
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*"
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
 	},
 	"peerDependenciesMeta": {
 		"@earendil-works/pi-coding-agent": {
 			"optional": true
+		},
+		"typebox": {
+			"optional": true
 		}
+	},
+	"devDependencies": {
+		"@types/node": "^22.20.5",
+		"typescript": "^7.0.2"
 	}
 }

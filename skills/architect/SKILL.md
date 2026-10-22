@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 # Architect
 
+In Pi, read [the Pi adapter](../../docs/harness/pi.md) once per session before you follow this skill. It maps the Cursor names in pstack skills to Pi.
+
 Sketch types, function signatures, class shapes, and module boundaries with `not implemented` bodies and pseudocode. Synthesize across multiple model perspectives, then fill in code against the chosen sketch.
 
 ## Start

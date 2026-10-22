@@ -5,87 +5,74 @@ description: Configure which models pstack uses per role and at what reasoning b
 
 # Setup pstack
 
-Write the pstack role map, the file that sets pstack's model per role. The `pi-pstack` extension owns the file format and the resolution rules; this skill is the interactive flow around `/setup-pstack`.
+The pstack role map sets the model each pstack role runs on and the reasoning budget for all of them. The `pi-pstack` extension owns it: `/setup-pstack` writes it, `/pstack-models` shows it, and the `pstack_models` tool returns it resolved.
 
 ## Steps
 
-### 1. Detect the available models
+### 1. Hand the user the command
 
-The models Pi can launch are the ones whose provider has working credentials. `/setup-pstack` reads that set from the session's model registry, so it never writes a model that fails at spawn time. If you need the list by hand, read it from `/pstack-models`, which prints every role and the model it resolves to.
+`/setup-pstack` is the user's command. You cannot type slash commands. Tell the user to run it, with the budget as its argument when they already named one:
 
-A model id is `provider/id`. A bare id works when it is unique in the catalog. The aliases `inherit-parent` and `auto` are always valid even though they are not detected ids.
+```text
+/setup-pstack large
+```
 
-### 2. Load the current state
+The command detects the models the session can launch, asks for a budget when none was given, keeps every role the user set before whose model is still available, lets the user confirm or change each role, and writes the map. A budget argument only skips the budget question; with dialog UI the user still confirms the roles.
 
-The stored role map is at `~/.pi/agent/state/pi-pstack/models.json`. Read it and treat its `budget` field and its role values as the current choices. If it does not exist, start from the skill defaults.
+### 2. Explain the budget when asked
 
-### 3. Budget, map, and confirm
-
-**(a) Ask for a budget.** Prefer `ask_user_question` over free text. Offer these four options with these exact labels, and name the current budget when the map records one. With no map, say that `large` matches the skill defaults.
+The budget caps the reasoning level of every role's model, panel seats included.
 
 - `unlimited — max reasoning`
-- `large — xhigh reasoning`
+- `large — xhigh reasoning` (upstream pstack's default)
 - `medium — high reasoning`
 - `small — medium reasoning`
 
-**(b) Apply it.** The budget sets the reasoning effort of every role's model, panel entries included.
+The budget is stored once. Role values carry no level; a role resolves to the highest level its model supports at or below the budget. A model that offers only levels above the budget runs at its lowest one and is reported as above budget.
 
-- `unlimited` sets the effort to `max`.
-- `large` sets it to `xhigh`.
-- `medium` sets it to `high`.
-- `small` sets it to `medium`.
+### 3. Show the current map when asked
 
-Pi carries the effort as a suffix on the model id, so a role's model is `provider/id:level`. The level is one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. When the model does not declare the budget's level, use its highest declared level at or below the target, so a role never runs above the budget the user chose. `inherit-parent` and `auto` do not change, because they name no model of their own.
+Call the `pstack_models` tool. It returns the budget, whether the map is the user's stored map or defaults, and each role's seats with the level applied.
 
-On a re-run, keep any role the user changed by family, list, or alias.
+### 4. Write the map by hand only when the command is unavailable
 
-**(c) Show the roles and confirm.** Show every role with its model, marking any role whose configured model is not available as needing a choice. Also list each role you dropped. Ask whether to accept as-is or change specific roles, offering the detected models plus `inherit-parent` and `auto` (both mean: this role runs on the parent chat model) as the options. Prefer `ask_user_question` over free text.
-
-For panel roles (`arena runners`, `architect runners`, `interrogate reviewers`) the value is a list, and one subagent runs per entry, alias entries included, so the list length sets the count. `arena cross-judge pool` is also a list, but Arena selects one value from it whose model family differs from the parent's when possible. `swarm workers` is the default model for every worker unless a race or comparison assigns another model per arm.
-
-### 4. Validate
-
-Every real model written must be one the session can launch. `inherit-parent` and `auto` always pass. If a chosen model is not available, stop and ask again.
-
-### 5. Write the map
-
-`/setup-pstack` writes the map. Write it by hand only when the command is unavailable; the format is the same either way. The file is JSON at `~/.pi/agent/state/pi-pstack/models.json`. Overwrite the whole file so re-runs stay idempotent.
+Ask the user first. The file is JSON at `~/.pi/agent/state/pi-pstack/models.json`. Write all of it, so a re-run stays idempotent. A role's value is a `provider/id` model id, a list of them for a panel role, or `inherit-parent` / `auto` for the parent chat model. An alias in a panel still counts as a seat.
 
 ```json
 {
   "budget": "large",
   "roles": {
-    "feature, refactoring": "openrouter/some-model:xhigh",
-    "bug-fix": "openrouter/some-model:xhigh",
-    "perf-issue": "openrouter/some-model:xhigh",
-    "hillclimb": "openrouter/some-model:xhigh",
-    "judgment and prose": "anthropic/some-model:xhigh",
-    "hardest tasks": "anthropic/some-model:xhigh",
-    "how explorer": "openrouter/some-model:xhigh",
-    "how explainer": "anthropic/some-model:xhigh",
-    "why investigators": "openrouter/some-model:xhigh",
-    "why synthesizer": "anthropic/some-model:xhigh",
-    "reflect tooling": "openrouter/some-model:xhigh",
-    "reflect judgment, divergent, synthesizer": "anthropic/some-model:xhigh",
-    "arena runners": ["anthropic/some-model:xhigh", "openrouter/some-model:xhigh"],
-    "arena cross-judge pool": ["anthropic/some-model:xhigh", "openrouter/some-model:xhigh"],
-    "swarm workers": "openrouter/some-model:xhigh",
-    "architect runners": ["anthropic/some-model:xhigh", "openrouter/some-model:xhigh"],
-    "interrogate reviewers": ["anthropic/some-model:xhigh", "openrouter/some-model:xhigh"]
+    "feature, refactoring": { "value": "openai/gpt-6-sol" },
+    "bug-fix": { "value": "openai/gpt-6-sol" },
+    "perf-issue": { "value": "openai/gpt-6-sol" },
+    "hillclimb": { "value": "openai/gpt-6-sol" },
+    "judgment and prose": { "value": "anthropic/claude-opus-5-5" },
+    "hardest tasks": { "value": "anthropic/claude-opus-5-5" },
+    "how explorer": { "value": "openai/gpt-6-sol" },
+    "how explainer": { "value": "anthropic/claude-opus-5-5" },
+    "why investigators": { "value": "openai/gpt-6-sol" },
+    "why synthesizer": { "value": "anthropic/claude-opus-5-5" },
+    "reflect tooling": { "value": "openai/gpt-6-sol" },
+    "reflect judgment, divergent, synthesizer": { "value": "anthropic/claude-opus-5-5" },
+    "arena runners": { "value": ["anthropic/claude-sonnet-5-5", "openai/gpt-6-sol"] },
+    "arena cross-judge pool": { "value": ["anthropic/claude-opus-5-5", "openai/gpt-6-astra"] },
+    "swarm workers": { "value": "openai/gpt-6-sol" },
+    "architect runners": { "value": ["anthropic/claude-opus-5-5", "openai/gpt-6-astra"] },
+    "interrogate reviewers": { "value": ["anthropic/claude-opus-5-5", "openai/gpt-6-astra"] }
   }
 }
 ```
 
-A role's value is one model id, or a list for a panel role. `inherit-parent` and `auto` are valid values, and an alias entry in a panel list still counts toward its fan-out.
+The model ids above are examples. Use ids from the `pstack_models` tool or from the user. Give a panel's seats different model families (`claude`, `gpt`, `gemini`, …), not one model through two providers, because a panel exists to get a second opinion. A role name not listed above is retired and is dropped when the map is read.
 
-### 6. Confirm
+### 5. Confirm
 
-Tell the user the map was written and that it applies to new sessions. Re-running this skill updates it.
+Tell the user the map was written and that it applies to subagents launched after it. Re-running `/setup-pstack` updates it.
 
-### 7. Offer a verification skill (optional)
+### 6. Offer a verification skill (optional)
 
 Check whether the project has a way to drive the real app for proof (a `verify-*` skill, or an existing harness). If not, offer once: "want a project-local verification skill, so agents can drive the app the way a user does and prove changes work? I can generate one with /create-verification-skill." On yes, invoke `/create-verification-skill`. On no, move on without pushing.
 
-### 8. Offer a formal verification skill (optional)
+### 7. Offer a formal verification skill (optional)
 
 Check whether the project already has a formal verification skill (a project skill that runs a model checker, a proof, or another verifier against the code). If not, offer once: "want a formal verification skill, so agents can prove a key property of your code holds in every case in scope, not only the cases tests reach? I can generate one with /create-formal-verification-skill." On yes, invoke `/create-formal-verification-skill`. On no, move on without pushing.

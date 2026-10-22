@@ -10,7 +10,7 @@ In Pi, read [the Pi adapter](../../docs/harness/pi.md) once per session before y
 
 A guided flow for turning the user's working conventions into a skill agents will follow. The output is one `-mode` skill tailored to them (e.g. `jay-mode`, `priya-mode`).
 
-This skill orchestrates three others: an inline mining pass (see step 1), Cursor's built-in `create-skill` (authoring), and the **unslop** skill (prose discipline). It sequences them. It doesn't replace them.
+This skill orchestrates three others: an inline mining pass (see step 1), `create-skill` (authoring), and the **unslop** skill (prose discipline). It sequences them. It doesn't replace them.
 
 ## Flow
 
@@ -66,7 +66,7 @@ The **poteto-mode** skill shows the shape. Read it for granularity. Don't copy i
 
 ### 4. Draft the skill
 
-Use Cursor's built-in `create-skill` skill to author the skill. Placement:
+Use `create-skill` to author the skill. Placement:
 
 - Path: preserve an existing mode skill's category. For a new mode, use `.pi/skills/<handle>/<handle>-mode/SKILL.md` when the repo has an established personal category for that handle. Otherwise default to `.pi/skills/<handle>-mode/SKILL.md` in the project (or `~/.pi/skills/<handle>-mode/` if the user prefers a personal skill).
 - Handle: the user's first name or chosen identifier.

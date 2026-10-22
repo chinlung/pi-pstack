@@ -10,7 +10,7 @@ Start smaller than you think. You don't need many skills on day one, or even thi
 /automate-me
 ```
 
-You don't describe your style, because [`/automate-me`](../../skills/automate-me/SKILL.md) reads it out of your history. It mines your recent transcripts in the active workspace for repeated preferences, in how you like replies, delegation, verification, code, prose, and process, then asks you which patterns are really you. It drafts `.pi/skills/<your-name>-mode/SKILL.md` through the authoring-a-skill playbook, runs the draft through [`/unslop`](../../skills/unslop/SKILL.md), and opens a PR from a worktree so you review it like any other change.
+You don't describe your style, because [`/automate-me`](../../skills/automate-me/SKILL.md) reads it out of your history. It mines your recent transcripts in the active workspace for repeated preferences, in how you like replies, delegation, verification, code, prose, and process, then asks you which patterns are really you. It drafts `.pi/skills/<your-name>-mode/SKILL.md` through `create-skill` flow, runs the draft through [`/unslop`](../../skills/unslop/SKILL.md), and opens a PR from a worktree so you review it like any other change.
 
 Run it again whenever your habits drift:
 

@@ -17,8 +17,9 @@
  *   node scripts/port-skills.mjs --check    # fail if skills/ is out of date
  */
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { danglingLinks, relinkUnshipped } from "./port-links.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UPSTREAM = join(ROOT, "upstream");
@@ -28,13 +29,14 @@ const GUIDE_OUT = join(ROOT, "docs", "guide");
 const ADAPTER_DIR = join(ROOT, "docs", "harness");
 
 /**
- * The file types whose contents are prose. Only these are rewritten.
+ * The file types read as text. Everything else, such as the guide's images, is copied as bytes.
  *
- * Source files are copied verbatim. A prose replacement applied to a TypeScript file can
- * corrupt an identifier, and upstream's `watch-pr` code matches a review bot by its login
- * name, so rewriting `bugbot` in code breaks both the build and the behavior it implements.
+ * Only Markdown gets the global term table. Code files, upstream's `.ts`, `.mjs` and `.sh`, are
+ * copied verbatim unless a single-file rule names them: a prose replacement applied to code
+ * corrupts identifiers, and upstream's `watch-pr` matches a review bot by its login name, so
+ * rewriting `bugbot` in code breaks both the build and the behavior it implements.
  */
-const PROSE_EXTENSIONS = new Set([".md", ".sh", ".mjs", ".txt"]);
+const TEXT_EXTENSIONS = new Set([".md", ".sh", ".mjs", ".ts", ".json", ".txt", ".lock"]);
 
 /**
  * The Cursor-to-Pi term table.
@@ -44,24 +46,14 @@ const PROSE_EXTENSIONS = new Set([".md", ".sh", ".mjs", ".txt"]);
  */
 const REPLACEMENTS = [
 	// The subagent tool. Cursor's Task tool is Pi's subagent tool.
-	[/`Task` tool/g, "the `subagent` tool"],
-	[/`Task` subagent/g, "a `subagent` call"],
 	[/`Task` call/g, "`subagent` call"],
-	[/`Task` calls/g, "`subagent` calls"],
-	[/`Task` prompt/g, "`subagent` prompt"],
 	[/\bTask spawn\b/g, "subagent spawn"],
-	[/\bthe Task schema\b/g, "the subagent schema"],
 	[/with the Task tool/g, "with the `subagent` tool"],
 	[/If the Task tool rejects/g, "If the `subagent` tool rejects"],
 	[/omit Task `model`/g, "omit the `model` field"],
-	[/the Task tool rejects/g, "the `subagent` tool rejects"],
 	[
 		/Spawn `Task` with/g,
 		"Spawn a `subagent` with",
-	],
-	[
-		/nesting works to depth 3, and a nested spawn has the full Task schema including `environment`/g,
-		"nesting works to depth 3, and a nested spawn has the full subagent schema including `cwd` and `worktree`",
 	],
 	[
 		/Substituting `generalPurpose` skips that read and drifts/g,
@@ -72,10 +64,6 @@ const REPLACEMENTS = [
 		"set their own `agent` for diverse-model review",
 	],
 	[
-		/One `Task` call, `subagent_type: generalPurpose`/g,
-		'One `subagent` call, `agent: "delegate"`',
-	],
-	[
 		/Reviewers return findings in the `Task` response body\./g,
 		"Reviewers return findings in the `subagent` response body.",
 	],
@@ -84,7 +72,6 @@ const REPLACEMENTS = [
 	[/`subagent_type: generalPurpose`/g, "`agent: \"delegate\"`"],
 	[/`subagent_type: "poteto-agent"`/g, "`agent: \"poteto-agent\"`"],
 	[/`subagent_type: "comment-sicko"`/g, "`agent: \"comment-sicko\"`"],
-	[/`subagent_type: generalPurpose`/g, "`agent: \"delegate\"`"],
 	[/`readonly: true`/g, "read-only"],
 	[/`readonly: false`/g, "agent mode"],
 	[/readonly\/Ask mode/g, "read-only mode"],
@@ -94,15 +81,13 @@ const REPLACEMENTS = [
 	[/`environment: "local"`/g, "no `worktree` flag"],
 
 	// The per-role model map. Upstream keeps it in an always-applied Cursor rule; Pi keeps it
-	// as JSON managed by the `/pstack-setup` command.
+	// as JSON managed by the `/setup-pstack` command, and the model reads it through the
+	// `pstack_models` tool, because a model cannot type the user's slash commands.
 	[
 		/`~\/\.cursor\/rules\/pstack-models\.mdc`/g,
-		"the pstack role map (`/pstack-models` shows it)",
+		"the pstack role map (the `pstack_models` tool returns it)",
 	],
 	[/the `pstack-models\.mdc` rule/g, "the pstack role map"],
-	[/the pstack-models\.mdc rule/g, "the pstack role map"],
-	[/`pstack-models\.mdc`/g, "the pstack role map"],
-	[/pstack-models\.mdc/g, "the pstack role map"],
 
 	// Cursor's skill and plugin locations. Pi installs skills from the package and the user's
 	// agent directory.
@@ -110,11 +95,9 @@ const REPLACEMENTS = [
 	[/`~\/\.cursor\/skills\/`/g, "`~/.pi/agent/skills/`"],
 	[/`\.cursor\/skills\/`/g, "the project's `.pi/skills/`"],
 	[/`\.cursor\/skills\/verify-<app>\/`/g, "the project's `.pi/skills/verify-<app>/`"],
-	[/`\.cursor\/skills\/verify-<app>`/g, "`.pi/skills/verify-<app>`"],
 	[/`\.cursor\/skills\/<handle>\/<handle>-mode\/SKILL\.md`/g, "`.pi/skills/<handle>/<handle>-mode/SKILL.md`"],
 	[/`\.cursor\/skills\/<handle>-mode\/SKILL\.md`/g, "`.pi/skills/<handle>-mode/SKILL.md`"],
 	[/`\.cursor\/skills\/<handle>\/`/g, "`.pi/skills/<handle>/`"],
-	[/`\.cursor\/skills\/`/g, "`.pi/skills/`"],
 	[/\.cursor\/skills\//g, ".pi/skills/"],
 	[
 		/misses one that lives at `\.cursor\/worktrees\/myrepo\/x`/g,
@@ -127,10 +110,6 @@ const REPLACEMENTS = [
 		"find this conversation's transcript in Pi's session directory under `~/.pi/agent/sessions/`. Read only the current session's file. That reads private chats from unrelated projects otherwise.",
 	],
 	[
-		/find the active workspace's `agent-transcripts\/` directory the system prompt names/g,
-		"find the active workspace's session directory under `~/.pi/agent/sessions/`",
-	],
-	[
 		/Reading local transcripts under `agent-transcripts\/`\./g,
 		"Reading the current session's local transcript.",
 	],
@@ -138,24 +117,13 @@ const REPLACEMENTS = [
 		/<agent-transcripts>/g,
 		"<session-dir>",
 	],
-	[
-		/# Transcripts dir: ~\/\.cursor\/projects\/<slugified-repo-path>\/agent-transcripts\./g,
-		"# Transcripts dir: Pi's session directory.",
-	],
-	[
-		/slug=\$\(printf '%s' "\$main_wt" \| sed 's#\^\/##; s#\/#-#g'\)\ntranscripts="\$HOME\/\.cursor\/projects\/\$slug\/agent-transcripts"/g,
-		'transcripts="$HOME/.pi/agent/sessions"',
-	],
 
 	// The interactive question tool.
 	[/`AskQuestion`/g, "`ask_user_question`"],
-	[/\bAskQuestion\b/g, "`ask_user_question`"],
 
 	// The todo list. Pi has a `scratchpad` tool for a checklist of things to keep in mind.
 	[/\bOpen a todolist\b/g, "Open a checklist"],
-	[/\ba todolist\b/g, "a checklist"],
 	[/\bthe todolist\b/g, "the checklist"],
-	[/\btodolist\b/g, "checklist"],
 	[/\btodo list\b/g, "checklist"],
 
 	// Cursor-only features. The adapter documents each one, so the skill keeps the step and
@@ -163,22 +131,22 @@ const REPLACEMENTS = [
 	//
 	// "Bugbot" stays a proper noun. It names a review bot, and a GitHub PR's review threads
 	// are still review threads in Pi, so the triage rules apply unchanged.
-	[/Cursor Automations/g, "Cursor Automations (not available in Pi)"],
-	[/\bCursor cloud agents\b/g, "Cursor cloud agents (not available in Pi)"],
-	[/\bCursor cloud agent\b/g, "Cursor cloud agent (not available in Pi)"],
-	[/\bcloud agent\b/g, "remote agent"],
-	[/\bcloud VM\b/g, "isolated environment"],
-	[/the built-in PR tool/g, "the `gh` CLI"],
+	// A Cursor cloud agent's job, an isolated checkout that keeps working on its own, is what a
+	// pi-subagents child launched with `worktree: true` does.
+	[/\ba Cursor cloud agent\b/g, "a `subagent` child launched with `worktree: true`"],
+	[/\bcloud agents\b/g, "`subagent` children launched with `worktree: true`"],
+	[/\bits own cloud VM\b/g, "its own worktree"],
+	// Pi has no `create-skill`. The name stays, so the routing labels reflect's templates share
+	// still match one another, and the adapter maps it to Pi's skill format.
+	[/Cursor's built-in `create-skill` skill/g, "`create-skill`"],
+	[/Cursor's built-in `create-skill`/g, "`create-skill`"],
+	[/the \*\*create-skill\*\* skill \(Cursor's built-in for authoring SKILL\.md files\)/g, "the **create-skill** skill"],
 
 	// The `cursor-team-kit` plugin's skills. Pi has no equivalent, so the skill names what Pi
 	// does instead: the project's own scripts, the `bash` tool, or the `unslop` skill.
 	//
 	// The specific rules come first. A generic `/deslop` rule would rewrite the text before
 	// the rule that also mentions `cursor-team-kit` gets a chance to match it.
-	[
-		/- `\/deslop`, `control-cli`, and `control-ui` ship in the `cursor-team-kit` plugin\./g,
-		"- `unslop` ships with pstack. The other two have no Pi equivalent; drive the surface with the project's own scripts.",
-	],
 	[
 		/Run `\/deslop` from `cursor-team-kit` over the diff before commit/g,
 		"Run `unslop` over the diff before commit",
@@ -197,15 +165,10 @@ const REPLACEMENTS = [
 	],
 	[/`control-ui` from `cursor-team-kit`/g, "the project's own driver script"],
 	[/`control-cli` from `cursor-team-kit`/g, "the project's own driver script"],
-	[
-		/`cursor-team-kit` publishes `control-cli` \(CLIs and TUIs\) and `control-ui` \(browser \/ Electron \/ web UIs\)/g,
-		"Pi drives those surfaces with the project's own scripts or the `bash` tool",
-	],
 	[/`\/deslop`/g, "the `unslop` skill"],
 
 	// Cursor's background loop. Pi has no `/loop`; a subagent that waits polls instead.
 	[/Cursor's `\/loop` command/g, "a polling watcher"],
-	[/`\/loop` command/g, "a polling watcher"],
 	[/`\/loop`/g, "a polling watcher"],
 ];
 
@@ -214,12 +177,82 @@ const REPLACEMENTS = [
  * global table for text the global table cannot express.
  */
 const FILE_RULES = [
+	// The rules below run against upstream's own text, before the global table.
+	{
+		match: "skills/poteto-mode/scripts/worktree-audit.sh",
+		rules: [
+			[
+				"# Transcripts dir: ~/.cursor/projects/<slugified-repo-path>/agent-transcripts.\nslug=$(printf '%s' \"$main_wt\" | sed 's#^/##; s#/#-#g')\ntranscripts=\"$HOME/.cursor/projects/$slug/agent-transcripts\"",
+				() =>
+					"# Transcripts: Pi keeps one session folder per working directory under\n# ~/.pi/agent/sessions, named for the directory with \"/\", \"\\\" and \":\" turned into \"-\".\npi_session_dir() { printf '%s/.pi/agent/sessions/--%s--' \"$HOME\" \"$(printf '%s' \"$1\" | sed 's#^[/\\\\]##; s#[/\\\\:]#-#g')\"; }\ntranscripts=$(pi_session_dir \"$main_wt\")",
+			],
+			[
+				"\tif [ -d \"$transcripts\" ]; then\n\t\tf=$(rg -l -e \"${wt}/\" -e \"${wt}\\\"\" \"$transcripts\" 2>/dev/null \\",
+				() =>
+					"\t# A chat that ran in the worktree has its own session folder. A chat that ran in the\n\t# main checkout counts when it names the worktree's path. Sibling folders hold\n\t# unrelated projects' private chats and are never read.\n\twt_sessions=$(pi_session_dir \"$wt\")\n\tif [ -d \"$transcripts\" ] || [ -d \"$wt_sessions\" ]; then\n\t\tf=$( { if [ -d \"$transcripts\" ]; then rg -l -0 -e \"${wt}/\" -e \"${wt}\\\"\" \"$transcripts\" 2>/dev/null; fi\n\t\t\tif [ -d \"$wt_sessions\" ]; then find \"$wt_sessions\" -name '*.jsonl' -type f -print0 2>/dev/null; fi; } \\",
+			],
+			// A path with a space must survive whole: a truncated worktree path maps to another
+			// project's session folder. Paths are cut after "worktree " and file names are
+			// NUL-delimited.
+			["\t\t\t| xargs stat -f '%m %N'", () => "\t\t\t| xargs -0 stat -f '%m %N'"],
+			["main_wt=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')", () => "main_wt=$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)"],
+			["git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do", () => "git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r wt; do"],
+		],
+	},
+	{
+		match: "skills/poteto-mode/playbooks/autonomous-run.md",
+		rules: [["using Cursor's `/loop` command (a built-in, not a pstack skill)", "using a polling watcher, a subagent that polls the condition and reports when it holds"]],
+	},
+	{
+		match: "skills/poteto-mode/playbooks/orchestrate.md",
+		rules: [
+			["the cloud agent's status in the Cursor dashboard", "the run's status from `subagent({ action: \"status\", id })`"],
+			["After a Cursor restart: local agents are dead, cloud work is not.", "After a Pi restart: foreground subagents are gone, async background runs keep going."],
+			[
+				"(nesting works to depth 3, and a nested spawn has the full Task schema including `environment`)",
+				"(nesting stops at pi-subagents' depth limit, 2 by default, so workers spawned by a sub-coordinator the main session spawned cannot spawn again; a nested spawn has the full `subagent` schema including `cwd` and `worktree`)",
+			],
+		],
+	},
+	{
+		match: "skills/poteto-mode/SKILL.md",
+		rules: [
+			[
+				"→ the **Babysit** playbook (`playbooks/babysit.md`), not Cursor's built-in babysit skill, whose description matches the same words.",
+				"→ the **Babysit** playbook (`playbooks/babysit.md`).",
+			],
+			["going offline, a Cursor restart, or imminent context compaction", "going offline, a Pi restart, or imminent context compaction"],
+		],
+	},
+	{
+		match: "skills/poteto-mode/playbooks/babysit.md",
+		rules: [[" This playbook replaces Cursor's built-in babysit skill for these requests, so do not route there even though its description matches the same words.", ""]],
+	},
+	{
+		match: "docs/guide/01-setup.md",
+		rules: [
+			[
+				"To keep `/poteto-mode` on for the whole chat, pick it from the `/` menu with Option+Enter (Mac) or Alt+Enter (Windows) instead of Enter. That makes it a [Custom Mode](https://cursor.com/docs/skills#using-a-skill-as-a-custom-mode), which stays in context on every turn until you exit it. Custom Modes are available in the Agents Window and the CLI. Plain Enter attaches the skill to one message, and it fades as the chat moves on.",
+				"Pi has no persistent modes. `/poteto-mode` inlines the skill into one message, and it fades as the chat moves on, so start each new task with `/poteto-mode` again.",
+			],
+		],
+	},
+	{
+		match: "docs/guide/02-poteto-mode.md",
+		rules: [
+			["and a Custom Mode keeps `/poteto-mode` in context on every turn.", "and the skill `/poteto-mode` inlined is still in the conversation."],
+			[
+				"The cleanest isolation is a [cloud subagent](https://cursor.com/docs/subagents#cloud-subagents). Each one gets its own VM and branch, so it can install dependencies, run your app, and record video of the result without touching your machine. Type `/in-cloud` before the task, or ask the parent chat to hand work to cloud subagents.",
+				"The cleanest isolation in Pi is a subagent launched with `worktree: true`. Each one gets its own git worktree and branch, so its edits and build output stay out of your checkout. Ports and other machine-wide resources are still shared, so tell each agent which port to use.",
+			],
+		],
+	},
 	{
 		match: "docs/guide/01-setup.md",
 		rules: [
 			[
 				/## Install the plugin\n\nIn a Cursor chat, run:\n\n```text\n\/add-plugin pstack\n```\n\nCursor confirms the plugin is installed\.\n\nIn Claude Code, run `\/plugin marketplace add cursor\/plugins`, then `\/plugin install pstack@cursor-plugins`\. Claude Code prefixes plugin commands, so each command in this guide takes a `pstack:` prefix there, such as `\/pstack:setup-pstack`, which writes its model rule to `~\/\.claude\/rules\/pstack-models\.md`\. The \[Claude Code adapter\]\(\.\.\/harness\/claude-code\.md\) covers the other differences\./g,
-				"## Install the package\n\nInstall it from the Pi package directory:\n\n```bash\npi install /path/to/pi-pstack\n```\n\nPi confirms the package is installed. The extension registers the `/poteto-mode`, `/setup-pstack` and `/pstack-models` commands, and the skills load as `/skill:<name>` commands. The [Pi adapter](../harness/pi.md) covers the differences from Cursor.",
+				"## Install the package\n\nInstall it from the Pi package directory:\n\n```bash\npi install /path/to/pi-pstack\n```\n\nPi confirms the package is installed. The extension registers the `/poteto-mode`, `/setup-pstack` and `/pstack-models` commands, and the skills load as `/skill:<name>` commands. The [Pi adapter](../harness/pi.md) maps upstream's names to Pi.",
 			],
 			[
 				/The defaults run at `xhigh` reasoning, the same as the `large` budget\. `unlimited` lifts each model to its highest tier, up to `max`\. Opus goes to `max`\. Grok tops out at `xhigh`, so it stays there\. `medium` and `small` lower the reasoning and spend fewer tokens\./g,
@@ -261,10 +294,6 @@ const FILE_RULES = [
 		match: "docs/guide/09-make-it-yours.md",
 		rules: [
 			[
-				/It drafts `\.pi\/skills\/<your-name>-mode\/SKILL\.md` through Cursor's built-in `create-skill` flow/g,
-				"It drafts `.pi/skills/<your-name>-mode/SKILL.md` through the authoring-a-skill playbook",
-			],
-			[
 				/which routes through Cursor's built-in `create-skill`, validates the frontmatter and links/g,
 				"which validates the frontmatter and links",
 			],
@@ -294,10 +323,6 @@ const FILE_RULES = [
 		match: "skills/poteto-mode/SKILL.md",
 		rules: [
 			[
-				/The `deslop` skill from the `cursor-team-kit` plugin \(`\/deslop`\)/g,
-				"the `unslop` skill (Pi has no `deslop` skill)",
-			],
-			[
 				/Shipping UI \/ IDE \/ CLI → the matching control skill\. `cursor-team-kit` publishes `control-cli` \(CLIs and TUIs\) and `control-ui` \(browser \/ Electron \/ web UIs\)\./g,
 				"Shipping UI / IDE / CLI → drive the surface yourself with the project's own scripts or the `bash` tool.",
 			],
@@ -305,32 +330,16 @@ const FILE_RULES = [
 				/Before commit → the `deslop` skill from the `cursor-team-kit` plugin \(`\/deslop`\)\./g,
 				"Before commit → the `unslop` skill, then the project's own formatter and linter.",
 			],
-			[
-				/Agent-facing prose also follows the `create-skill` skill \(Cursor's built-in for authoring SKILL\.md files\)\./g,
-				"Agent-facing prose also follows the `authoring-a-skill` playbook.",
-			],
-			[
-				/Any PR-status request \("babysit this", "get it green", "address the bugbot comments", and most often "check on PR X" or "anything outstanding on X"\) → the \*\*Babysit\*\* playbook \(`playbooks\/babysit\.md`\), not Cursor's built-in babysit skill, whose description matches the same words\./g,
-				'Any PR-status request ("babysit this", "get it green", "address the review comments", and most often "check on PR X" or "anything outstanding on X") → the **Babysit** playbook (`playbooks/babysit.md`).',
-			],
 		],
 	},
 	{
 		match: "skills/poteto-mode/playbooks/orchestrate.md",
 		rules: [
-			[
-				/includes `environment`/g,
-				"includes `cwd` and `worktree`",
-			],
 		],
 	},
 	{
 		match: "skills/swarm/SKILL.md",
 		rules: [
-			[
-				/Spawn all N workers in one message with `agent: "delegate"`, `environment: "cloud"`, `run_in_background: true`, and the step 4 model, left unset for `auto` or `inherit-parent`\. Use `environment: "local"` only when the worker needs access to something on the user's computer\./g,
-				"Spawn all N workers in one message with `agent: \"delegate\"`, `async: true`, and the step 4 model, left unset for `auto` or `inherit-parent`. Use `worktree: true` when a worker needs its own checkout.",
-			],
 			[
 				/When a worker must start from a non-default pushed branch, pass `cloud_base_branch`\./g,
 				"When a worker must start from a non-default pushed branch, tell the worker which branch to check out.",
@@ -401,15 +410,6 @@ const FILE_RULES = [
 		],
 	},
 	{
-		match: "skills/poteto-mode/scripts/worktree-audit.sh",
-		rules: [
-			[
-				/transcripts="\$HOME\/\.cursor\/projects\/\$slug\/agent-transcripts"/g,
-				'transcripts="$HOME/.pi/agent/sessions"',
-			],
-		],
-	},
-	{
 		match: "agents/poteto-agent.md",
 		rules: [
 			[
@@ -421,40 +421,24 @@ const FILE_RULES = [
 	{
 		match: "skills/reflect/references/judgment-reviewer.md",
 		rules: [
-			[
-				/\(under `\.pi\/skills\/`, `~\/\.pi\/agent\/skills\/`, or the pi-pstack package's\)/g,
-				"(under the project's `.pi/skills/`, `~/.pi/agent/skills/`, or the pi-pstack package's)",
-			],
 			[/\ba `Task` prompt naming its path/g, "a `subagent` prompt naming its path"],
 		],
 	},
 	{
 		match: "skills/reflect/references/tooling-reviewer.md",
 		rules: [
-			[
-				/\(under `\.pi\/skills\/`, `~\/\.pi\/agent\/skills\/`, or the pi-pstack package's\)/g,
-				"(under the project's `.pi/skills/`, `~/.pi/agent/skills/`, or the pi-pstack package's)",
-			],
 			[/\ba `Task` prompt naming its path/g, "a `subagent` prompt naming its path"],
 		],
 	},
 	{
 		match: "skills/reflect/references/divergent-reviewer.md",
 		rules: [
-			[
-				/\(under `\.pi\/skills\/`, `~\/\.pi\/agent\/skills\/`, or the pi-pstack package's\)/g,
-				"(under the project's `.pi/skills/`, `~/.pi/agent/skills/`, or the pi-pstack package's)",
-			],
 			[/\ba `Task` prompt naming its path/g, "a `subagent` prompt naming its path"],
 		],
 	},
 	{
 		match: "skills/maintain-verification-skill/SKILL.md",
 		rules: [
-			[
-				/\(usually `\.pi\/skills\/verify-\*\/`\)/g,
-				"(usually `.pi/skills/verify-*/`)",
-			],
 		],
 	},
 ];
@@ -480,14 +464,6 @@ const MODEL_DEFAULTS = [
 		"use the two families the role map names for that role",
 	],
 	[
-		/default to one each on `claude-opus-5-5-xhigh` and `grok-4\.7-xhigh-fast`/g,
-		"default to one on each of the two families the role map names for that role",
-	],
-	[
-		/`claude-opus-5-5-xhigh` and `grok-4\.7-xhigh-fast`/g,
-		"the two families the role map names for that role",
-	],
-	[
 		/default `grok-4\.7-xhigh-fast`/g,
 		"the role map's entry for that role",
 	],
@@ -496,32 +472,7 @@ const MODEL_DEFAULTS = [
 		/`grok-4\.7-xhigh-fast` by default/g,
 		"the role map's entry for that role, by default",
 	],
-	[
-		/`claude-opus-5-5-xhigh` by default/g,
-		"the role map's entry for that role, by default",
-	],
 	[/use `grok-4\.7-xhigh-fast`/g, "use the role map's entry for that role"],
-	[/\(default `grok-4\.7-xhigh-fast`\)/g, "(the role map's entry for that role)"],
-	[/\(default `claude-opus-5-5-xhigh`\)/g, "(the role map's entry for that role)"],
-	[
-		/`grok-4\.7-xhigh-fast` \(default\)/g,
-		"the role map's entry for that role (default)",
-	],
-	[
-		/`claude-opus-5-5-xhigh` \(default\)/g,
-		"the role map's entry for that role (default)",
-	],
-	[
-		/`grok-4\.7-xhigh-fast` by default\)/g,
-		"the role map's entry for that role, by default)",
-	],
-	[
-		/`claude-opus-5-5-xhigh` by default\)/g,
-		"the role map's entry for that role, by default)",
-	],
-	[/use `grok-4\.7-xhigh-fast`\./g, "use the role map's entry for that role."],
-	[/default `grok-4\.7-xhigh-fast`\./g, "the role map's entry for that role."],
-	[/default `claude-opus-5-5-xhigh`\./g, "the role map's entry for that role."],
 
 	// The remaining bare slugs: the family tables and the per-role defaults list. Pi's model
 	// ids are provider-scoped, so a bare family prefix becomes a family name.
@@ -532,14 +483,6 @@ const MODEL_DEFAULTS = [
 	[
 		/go to your strongest judgment model \(`claude-opus-5-5-xhigh`\)/g,
 		"go to the role map's `hardest tasks` model",
-	],
-	[
-		/stays on the `swarm workers` model and speed \(`grok-4\.7-xhigh-fast` by default\)/g,
-		"stays on the `swarm workers` model and speed",
-	],
-	[
-		/`model` from the `reflect judgment, divergent, synthesizer` line \(default `claude-opus-5-5-xhigh`\)/g,
-		"`model` from the `reflect judgment, divergent, synthesizer` line",
 	],
 	[
 		/\| `reflect judgment, divergent, synthesizer` \| `claude-opus-5-5-xhigh` \|/g,
@@ -559,7 +502,7 @@ const MODEL_DEFAULTS = [
 	],
 	[
 		/Families go by prefix: `claude-\*`, and `grok-\*` with `cursor-grok-\*` and `composer-\*`\. A refused `composer-\*` entry runs on `grok-4\.7-xhigh-fast`\. With no family match, use `claude-opus-5-5-xhigh`\./g,
-		"Pi model ids are provider-scoped, so the family is the provider prefix. A rejected entry runs on the same role's other entry. With no family match, use the role map's first entry.",
+		"A family is the model's vendor lineage (`claude`, `gpt`, `gemini`, …), not its provider, as the Pi adapter defines it, so one model reached through two providers is one family. A rejected entry runs on the same role's other entry. With no family match, use the role map's first entry.",
 	],
 	[
 		/A refused `composer-\*` entry runs on Reviewer B's default\. With no family match, use Reviewer A's default\./g,
@@ -567,11 +510,7 @@ const MODEL_DEFAULTS = [
 	],
 	[
 		/Families go by prefix: `claude-\*`, and `grok-\*` with `cursor-grok-\*` and `composer-\*`\./g,
-		"Pi model ids are provider-scoped, so the family is the provider prefix.",
-	],
-	[
-		/So `unlimited` turns `claude-opus-5-5-xhigh` into `claude-opus-5-5-max`\. Grok slugs top out at `xhigh`, so under `unlimited` the fallback puts Grok at `xhigh` and keeps `grok-4\.7-xhigh-fast` as it is\. `large` keeps both defaults\. `small` turns them into `claude-opus-5-5-medium` and `grok-4\.7-medium-fast`\./g,
-		"A budget raises or lowers the effort token of each role's model, within the levels that model declares. `large` keeps the role map as it is.",
+		"A family is the model's vendor lineage (`claude`, `gpt`, `gemini`, …), not its provider, as the Pi adapter defines it, so one model reached through two providers is one family.",
 	],
 ];
 
@@ -583,19 +522,38 @@ function walk(dir) {
 	});
 }
 
-/** Applies the replacement table to one file's text. */
-function port(text, relativePath) {
-	// A source file is copied verbatim. A prose replacement applied to code can corrupt an
-	// identifier, so the rewrite never touches a file that is not prose.
-	if (!PROSE_EXTENSIONS.has(extname(relativePath))) return text;
+/**
+ * How many files each rule changed. A rule that changes nothing fails the port: either upstream
+ * moved the text it was written for, or an earlier rule already rewrote it, and either way the
+ * rule no longer does what its author thought.
+ */
+const hits = new Map();
+
+function apply(entries, text) {
 	let out = text;
-	for (const [pattern, replacement] of REPLACEMENTS) out = out.replace(pattern, replacement);
-	for (const [pattern, replacement] of MODEL_DEFAULTS) out = out.replace(pattern, replacement);
-	for (const rule of FILE_RULES) {
-		if (rule.match !== relativePath) continue;
-		for (const [pattern, replacement] of rule.rules) out = out.replace(pattern, replacement);
+	for (const entry of entries) {
+		const next = out.replace(entry[0], entry[1]);
+		if (next !== out) hits.set(entry, (hits.get(entry) ?? 0) + 1);
+		out = next;
 	}
 	return out;
+}
+
+function fileRulesFor(relativePath) {
+	return FILE_RULES.filter((rule) => rule.match === relativePath).flatMap((rule) => rule.rules);
+}
+
+/**
+ * Ports one text file. Single-file rules run first, against upstream's own text, and again after
+ * the global table, for rules that name text the table produces. Only Markdown gets the table.
+ */
+function port(text, relativePath) {
+	const fileRules = fileRulesFor(relativePath);
+	let out = apply(fileRules, text);
+	if (extname(relativePath) !== ".md") return out;
+	out = apply(REPLACEMENTS, out);
+	out = apply(MODEL_DEFAULTS, out);
+	return apply(fileRules, out);
 }
 
 /**
@@ -657,7 +615,7 @@ function render() {
 	for (const path of walk(join(UPSTREAM, "docs", "guide"))) {
 		const relativePath = relative(join(UPSTREAM, "docs", "guide"), path);
 		const key = `docs/guide/${relativePath}`;
-		files.set(key, PROSE_EXTENSIONS.has(extname(relativePath)) ? readFileSync(path, "utf8") : readFileSync(path));
+		files.set(key, TEXT_EXTENSIONS.has(extname(relativePath)) ? readFileSync(path, "utf8") : readFileSync(path));
 	}
 
 	const rendered = new Map();
@@ -669,7 +627,7 @@ function render() {
 			continue;
 		}
 		// A binary file is copied, not rewritten.
-		if (!PROSE_EXTENSIONS.has(extname(relativePath))) {
+		if (typeof content !== "string") {
 			rendered.set(relativePath, content);
 			continue;
 		}
@@ -677,15 +635,68 @@ function render() {
 		// The agent prompts are not skills, so they get no adapter line, but they do get the
 		// Cursor names removed. The guide pages are read by a human, so they get the adapter
 		// link only when they mention a Cursor name.
-		if (relativePath.endsWith("SKILL.md") && needsAdapter(out) && /^# /m.test(out)) {
+		if (relativePath.endsWith("SKILL.md") && needsAdapter(content) && /^# /m.test(out)) {
 			out = out.replace(/^(# .*)\n+/m, `$1\n\n${ADAPTER_LINE}\n\n`);
 		}
 		rendered.set(relativePath, out);
 	}
+	for (const [key, content] of rendered) {
+		if (typeof content === "string" && key.endsWith(".md")) rendered.set(key, relinkUnshipped(key, content, (target) => ships(target, rendered)));
+	}
 	return rendered;
 }
 
+/** The roots the port regenerates. Their old contents are deleted, so only `rendered` counts. */
+const GENERATED_ROOTS = ["agents/", "docs/guide/", "skills/"];
+
+/**
+ * True when a link target is a file this package ships: a rendered file, or a hand-written file
+ * at the package root such as `README.md` or `docs/harness/pi.md`. A target under a generated
+ * root must be rendered, because the port deletes whatever else is there.
+ */
+function ships(target, rendered) {
+	if (rendered.has(target)) return true;
+	// A directory link ships when a rendered file lives under it.
+	const dir = target.endsWith("/") ? target : `${target}/`;
+	for (const key of rendered.keys()) if (key.startsWith(dir)) return true;
+	if (target.startsWith("..") || GENERATED_ROOTS.some((root) => target.startsWith(root))) return false;
+	return existsSync(join(ROOT, target));
+}
+
+/** Relative links whose target the package does not ship and upstream cannot hold. */
+function findDanglingLinks(rendered) {
+	const dangling = [];
+	for (const [key, content] of rendered) {
+		if (typeof content !== "string" || !key.endsWith(".md")) continue;
+		for (const href of danglingLinks(key, content, (target) => ships(target, rendered))) dangling.push(`${key} links to ${href}`);
+	}
+	return dangling;
+}
+
+/** Where a rendered file is written: each key prefix has its own output root. */
+function outputPath(key) {
+	for (const [prefix, root] of [
+		["agents/", AGENTS_OUT],
+		["docs/guide/", GUIDE_OUT],
+		["skills/", SKILLS_OUT],
+	]) {
+		if (key.startsWith(prefix)) return join(root, key.slice(prefix.length));
+	}
+	throw new Error(`no output root for ${key}`);
+}
+
 const rendered = render();
+
+const deadRules = [
+	...REPLACEMENTS.map((entry, index) => [`REPLACEMENTS[${index}]`, entry]),
+	...MODEL_DEFAULTS.map((entry, index) => [`MODEL_DEFAULTS[${index}]`, entry]),
+	...FILE_RULES.flatMap((rule) => rule.rules.map((entry, index) => [`FILE_RULES ${rule.match}[${index}]`, entry])),
+].filter(([, entry]) => !hits.has(entry));
+if (deadRules.length > 0) {
+	console.log(`${deadRules.length} rule(s) changed nothing. Delete each one, or fix it to match the text it is for:`);
+	for (const [label, entry] of deadRules) console.log(`  ${label} ${String(entry[0]).slice(0, 110)}`);
+	process.exit(1);
+}
 
 /**
  * The adapter file every ported skill links to. A skill that points at a missing adapter
@@ -726,6 +737,14 @@ const FORBIDDEN = [
 	{ pattern: /cursor-team-kit/, label: "cursor-team-kit", except: [] },
 	{ pattern: /agent-transcripts/, label: "agent-transcripts", except: [] },
 	{ pattern: /`\/loop`/, label: "`/loop`", except: [] },
+	{ pattern: /\.cursor-plugin/, label: ".cursor-plugin", except: [] },
+	{ pattern: /family is the provider/, label: "family is the provider", except: [] },
+	{ pattern: /cursor\.com/, label: "cursor.com", except: [] },
+	{ pattern: /Custom Mode/, label: "Custom Mode", except: [] },
+	// Any other mention of Cursor is a step written for a harness this port does not run in. The
+	// two exceptions name Cursor on purpose: the help skill says this is a port of a Cursor
+	// plugin, and worktree cleanup reclaims the Cursor app's disk space when it is installed.
+	{ pattern: /\bCursor\b/, label: "Cursor", except: ["skills/poteto-help/SKILL.md", "skills/poteto-mode/playbooks/worktree-cleanup.md"] },
 ];
 
 /**
@@ -739,18 +758,25 @@ function findLeftovers(files) {
 	const problems = [];
 	for (const [path, content] of files) {
 		if (path.startsWith("docs/harness/")) continue;
-		if (path.includes("setup-pstack") && path.endsWith("SKILL.md")) continue;
 		if (typeof content !== "string") continue;
+		const text = content.replace(ADAPTER_LINE, "");
 		for (const rule of FORBIDDEN) {
 			if (rule.except.includes(path)) continue;
-			const match = content.match(rule.pattern);
+			const match = text.match(rule.pattern);
 			if (match) {
-				const line = content.slice(0, match.index).split("\n").length;
+				const line = text.slice(0, match.index).split("\n").length;
 				problems.push(`${path}:${line} ${rule.label} (${match[0]})`);
 			}
 		}
 	}
 	return problems;
+}
+
+const dangling = findDanglingLinks(rendered);
+if (dangling.length > 0) {
+	console.log(`${dangling.length} relative link(s) point outside the package:`);
+	for (const link of dangling) console.log(`  ${link}`);
+	process.exit(1);
 }
 
 const leftovers = findLeftovers(rendered);
@@ -799,11 +825,7 @@ if (process.argv.includes("--check")) {
 	rmSync(AGENTS_OUT, { recursive: true, force: true });
 	rmSync(GUIDE_OUT, { recursive: true, force: true });
 	for (const [path, content] of rendered) {
-		const out = path.startsWith("agents/")
-			? join(AGENTS_OUT, path.slice("agents/".length))
-			: path.startsWith("docs/guide/")
-				? join(GUIDE_OUT, path.slice("docs/guide/".length))
-				: join(SKILLS_OUT, path.slice("skills/".length));
+		const out = outputPath(path);
 		mkdirSync(dirname(out), { recursive: true });
 		writeFileSync(out, content);
 	}

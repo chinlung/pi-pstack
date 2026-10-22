@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 # How
 
+In Pi, read [the Pi adapter](../../docs/harness/pi.md) once per session before you follow this skill. It maps the Cursor names in pstack skills to Pi.
+
 Explore the codebase to answer "how does X work?" questions. Produce architectural explanations at the level of a senior engineer onboarding onto a subsystem, enough to build a working mental model, not so much that it reads like annotated source code.
 
 Every spawn is a read-only `subagent` call with `agent: "delegate"`. Explorers use the `how explorer` line in the pstack role map (the role map's entry for that role), and every explainer uses the `how explainer` line (the role map's entry for that role). Set `model` to that line's value, or to the default if the rule or the line is missing. Leave `model` unset when the value is `auto` or `inherit-parent`. If the `subagent` tool rejects a slug, use the default and say so. If it rejects the default, use the closest valid slug of the same family from its error message. Pick each subagent's reasoning level and fast or standard speed for the job, per the Subagents section of the **poteto-mode** skill.

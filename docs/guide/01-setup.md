@@ -10,7 +10,7 @@ Install it from the Pi package directory:
 pi install /path/to/pi-pstack
 ```
 
-Pi confirms the package is installed. The extension registers the `/poteto-mode`, `/setup-pstack` and `/pstack-models` commands, and the skills load as `/skill:<name>` commands. The [Pi adapter](../harness/pi.md) covers the differences from Cursor.
+Pi confirms the package is installed. The extension registers the `/poteto-mode`, `/setup-pstack` and `/pstack-models` commands, and the skills load as `/skill:<name>` commands. The [Pi adapter](../harness/pi.md) maps upstream's names to Pi.
 
 ## Pick your models
 
@@ -20,7 +20,7 @@ Run:
 /setup-pstack
 ```
 
-[`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, asks for a reasoning budget, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes the pstack role map (`/pstack-models` shows it), a small rule every pstack skill reads.
+[`/setup-pstack`](../../skills/setup-pstack/SKILL.md) detects the models you have access to, asks for a reasoning budget, shows you each role (code delegates, judgment, the review panels), and asks what you want. Answer the questions. It writes the pstack role map (the `pstack_models` tool returns it), a small rule every pstack skill reads.
 
 The defaults run at `xhigh` reasoning, the same as the `large` budget. `unlimited` lifts each model to its highest tier, up to `max`, as far as the model declares it. `medium` and `small` lower the reasoning and spend fewer tokens.
 
@@ -59,6 +59,6 @@ Pick something real but small, and describe it the way you'd describe it to a co
 
 Watch the checklist. Its first items are the matched playbook's steps copied in, the Feature playbook for this prompt. If `/poteto-mode` skips a step, the step stays in the list with `skip: <reason>`, so you can see what it chose not to do.
 
-From here you can type normal follow-ups. To keep `/poteto-mode` on for the whole chat, pick it from the `/` menu with Option+Enter (Mac) or Alt+Enter (Windows) instead of Enter. That makes it a [Custom Mode](https://cursor.com/docs/skills#using-a-skill-as-a-custom-mode), which stays in context on every turn until you exit it. Custom Modes are available in the Agents Window and the CLI. Plain Enter attaches the skill to one message, and it fades as the chat moves on.
+From here you can type normal follow-ups. Pi has no persistent modes. `/poteto-mode` inlines the skill into one message, and it fades as the chat moves on, so start each new task with `/poteto-mode` again.
 
 Next: [Route work through `/poteto-mode`](./02-poteto-mode.md).

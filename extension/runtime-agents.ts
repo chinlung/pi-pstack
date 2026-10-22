@@ -1,11 +1,10 @@
 /**
- * Registers pstack's two agents with pi-subagents as runtime agents.
+ * Registers agents with pi-subagents as runtime agents, through its event bus.
  *
- * Upstream pstack ships `agents/poteto-agent.md` and `agents/comment-sicko.md` as Cursor
- * subagent files. Pi's equivalent is a pi-subagents agent, which can be a file in the package's
- * `agents/` directory. Registering them as runtime agents instead lets the package resolve the
- * skill path at load time, so a delegate can always find the installed `poteto-mode` skill
- * without depending on a hard-coded install location.
+ * Runtime registration, rather than agent files in the package manifest, lets the extension put
+ * the installed skills' absolute paths into each prompt. The two must not both exist: pi-subagents
+ * checks runtime agents against discovered agents when it merges them for a launch, and a name
+ * collision there fails agent discovery for every launch.
  */
 const RUNTIME_REGISTER_EVENT = "pi-subagents:runtime-agent-register:v1";
 /**
@@ -42,31 +41,4 @@ export function registerRuntimeAgent(
 	if (!request.result) throw new Error("pi-subagents is not installed or not ready");
 	if (!request.result.ok) throw request.result.error;
 	return request.result.registration;
-}
-
-/** True when pi-subagents is loaded and can accept runtime agents. */
-export function hasSubagents(pi: RuntimeAgentHost): boolean {
-	const request: {
-		version: 1;
-		name: string;
-		definition: Record<string, unknown>;
-		result?: { ok: true; registration: RuntimeRegistration } | { ok: false; error: Error };
-	} = {
-		version: 1,
-		name: "pi-pstack-probe",
-		definition: {
-			description: "probe",
-			systemPrompt: "probe",
-			tools: ["read"],
-		},
-	};
-	try {
-		pi.events.emit(RUNTIME_REGISTER_EVENT, request);
-	} catch {
-		return false;
-	}
-	if (!request.result) return false;
-	if (!request.result.ok) return false;
-	request.result.registration.dispose();
-	return true;
 }

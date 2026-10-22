@@ -28,7 +28,7 @@ cd "$repo" || exit 1
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "error: not a git repo: $repo" >&2; exit 1; }
 
 # Main worktree is the first entry; everything else is a candidate.
-main_wt=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+main_wt=$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)
 
 if [ -z "$base" ]; then
 	for cand in "$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)" origin/main origin/master; do
@@ -61,14 +61,16 @@ elif raw=$(gh pr list --author "@me" --state all --limit 1000 \
 fi
 [ -s "$prs" ] || echo "[]" > "$prs"
 
-# Transcripts dir: Pi's session directory.
-transcripts="$HOME/.pi/agent/sessions"
+# Transcripts: Pi keeps one session folder per working directory under
+# ~/.pi/agent/sessions, named for the directory with "/", "\" and ":" turned into "-".
+pi_session_dir() { printf '%s/.pi/agent/sessions/--%s--' "$HOME" "$(printf '%s' "$1" | sed 's#^[/\\]##; s#[/\\:]#-#g')"; }
+transcripts=$(pi_session_dir "$main_wt")
 now=$(date +%s)
 
 echo "# base: $base"
 printf "SIZE\tAGE\tMERGED\tDIRTY\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tWORKTREE\n"
 
-git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
+git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r wt; do
 	[ "$wt" = "$main_wt" ] && continue
 
 	size=$(du -sh "$wt" 2>/dev/null | awk '{print $1}')
@@ -102,9 +104,14 @@ git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt;
 	# Most recent chat whose transcript operated in this worktree. Match path
 	# followed by "/" or a quote so glint-482 does not match glint-482-r37.
 	last="-"; last_ts=0
-	if [ -d "$transcripts" ]; then
-		f=$(rg -l -e "${wt}/" -e "${wt}\"" "$transcripts" 2>/dev/null \
-			| xargs stat -f '%m %N' 2>/dev/null | sort -rn | head -1)
+	# A chat that ran in the worktree has its own session folder. A chat that ran in the
+	# main checkout counts when it names the worktree's path. Sibling folders hold
+	# unrelated projects' private chats and are never read.
+	wt_sessions=$(pi_session_dir "$wt")
+	if [ -d "$transcripts" ] || [ -d "$wt_sessions" ]; then
+		f=$( { if [ -d "$transcripts" ]; then rg -l -0 -e "${wt}/" -e "${wt}\"" "$transcripts" 2>/dev/null; fi
+			if [ -d "$wt_sessions" ]; then find "$wt_sessions" -name '*.jsonl' -type f -print0 2>/dev/null; fi; } \
+			| xargs -0 stat -f '%m %N' 2>/dev/null | sort -rn | head -1)
 		if [ -n "$f" ]; then last_ts=$(echo "$f" | awk '{print $1}')
 			last=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null); fi
 	fi

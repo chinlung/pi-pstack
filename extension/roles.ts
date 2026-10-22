@@ -1,112 +1,54 @@
 /**
- * pstack role table: the per-role model map that pstack's `setup-pstack` skill writes and every
- * other skill reads.
+ * The pstack role table: the roles a skill can ask a model for, the reasoning budget, and the
+ * shape of the stored role map.
  *
- * Upstream pstack keeps this in `~/.cursor/rules/pstack-models.mdc`. Pi has no always-applied
- * rule format, so this package keeps it as JSON in the agent directory and reads it back at
- * session start. The role names and the shape of each entry are unchanged from upstream, so a
- * pstack model map means the same thing in either harness.
+ * Upstream pstack keeps the role map in `~/.cursor/rules/pstack-models.mdc`. This package keeps
+ * it as JSON in the Pi agent directory. The role names are upstream's, so a pstack role means
+ * the same thing in either harness.
  */
 
-/** A role's model choice. `inherit` and `auto` both mean "run on the parent chat model". */
+/** A stored role value: a model id, or `inherit-parent` / `auto` for the parent chat model. */
 export type RoleValue = string;
 
-/**
- * A role's model choice. A panel role holds a list, and one subagent runs per entry, so the
- * list length sets the count.
- */
-export type RoleEntry =
-	| { readonly value: RoleValue }
-	| { readonly value: readonly RoleValue[] };
-
-export interface RoleMap {
-	/** The reasoning budget label chosen in setup: unlimited, large, medium, small. */
-	readonly budget: BudgetLabel;
-	readonly roles: Readonly<Record<string, RoleEntry>>;
-}
+/** A role's stored choice. A panel role holds one value per seat. */
+export type RoleEntry = { readonly value: RoleValue } | { readonly value: readonly RoleValue[] };
 
 export type BudgetLabel = "unlimited" | "large" | "medium" | "small";
 
-/**
- * Reasoning effort per budget label. The ladder runs max > xhigh > high > medium > low.
- * `unlimited` and `large` differ only at the top of the ladder.
- */
-export const BUDGET_EFFORT: Record<BudgetLabel, string> = {
-	unlimited: "max",
-	large: "xhigh",
-	medium: "high",
-	small: "medium",
-};
+export const BUDGETS: readonly BudgetLabel[] = ["unlimited", "large", "medium", "small"];
+
+export interface RoleMap {
+	readonly budget: BudgetLabel;
+	readonly roles: Readonly<Record<string, RoleEntry>>;
+}
 
 /** The effort ladder, ordered from most to least reasoning. */
 export const EFFORT_LADDER = ["max", "xhigh", "high", "medium", "low", "minimal", "off"] as const;
 
 export type Effort = (typeof EFFORT_LADDER)[number];
 
-/**
- * The strongest level a model declares.
- *
- * A model's declared levels come from a map, and the map's key order is the provider's, not
- * the ladder's. A model that declares `["minimal", "low", "medium", "high", "xhigh", "max"]`
- * offers `max`, so taking the first key would rank it below a model that offers only `off`.
- */
-export function strongestDeclaredLevel(levels: readonly string[]): Effort | undefined {
-	let best: Effort | undefined;
-	for (const level of levels) {
-		if (!EFFORT_LADDER.includes(level as Effort)) continue;
-		const candidate = level as Effort;
-		if (best === undefined || EFFORT_LADDER.indexOf(candidate) < EFFORT_LADDER.indexOf(best)) {
-			best = candidate;
-		}
-	}
-	return best;
+/** The level each budget caps a role at. */
+export const BUDGET_EFFORT: Readonly<Record<BudgetLabel, Effort>> = {
+	unlimited: "max",
+	large: "xhigh",
+	medium: "high",
+	small: "medium",
+};
+
+export function isBudget(value: unknown): value is BudgetLabel {
+	return typeof value === "string" && (BUDGETS as readonly string[]).includes(value);
+}
+
+export function isLevel(value: string): value is Effort {
+	return (EFFORT_LADDER as readonly string[]).includes(value);
 }
 
 /**
- * True when a level is at or below a budget's effort.
- *
- * The ladder runs from most to least reasoning, so a lower index means more reasoning. A
- * budget caps the reasoning a role may spend, so the levels it allows are the ones at or
- * after the target's index, not before it.
+ * True when `level` spends no more reasoning than the budget's level. The ladder runs from most
+ * to least reasoning, so the allowed levels are the ones at or after the target's index.
  */
-export function isAtOrBelowBudget(level: string, target: string): boolean {
-	const levelIndex = EFFORT_LADDER.indexOf(level as Effort);
-	const targetIndex = EFFORT_LADDER.indexOf(target as Effort);
-	if (levelIndex < 0 || targetIndex < 0) return false;
-	return levelIndex >= targetIndex;
-}
-
-/** The last token of a model slug, or the one before a trailing `fast`. */
-export function effortOf(slug: string): Effort | undefined {
-	const parts = slug.split(/[-_:]/).filter(Boolean);
-	const tail = parts.at(-1);
-	if (tail === "fast") {
-		const previous = parts.at(-2);
-		return previous && (EFFORT_LADDER as readonly string[]).includes(previous) ? (previous as Effort) : undefined;
-	}
-	return tail && (EFFORT_LADDER as readonly string[]).includes(tail) ? (tail as Effort) : undefined;
-}
-
-/** Replaces the effort token of a slug, keeping the family and the fast marker. */
-export function withEffort(slug: string, effort: Effort): string {
-	const parts = slug.split(/[-_:]/).filter(Boolean);
-	if (parts.at(-1) === "fast") {
-		const previous = parts.at(-2);
-		if (previous && (EFFORT_LADDER as readonly string[]).includes(previous)) {
-			parts[parts.length - 2] = effort;
-			return parts.join("-");
-		}
-	}
-	parts.push(effort);
-	return parts.join("-");
-}
-
-/** The model family a slug belongs to. Families go by prefix. */
-export function familyOf(slug: string): string {
-	const head = slug.split("/")[0];
-	if (head.includes("/")) return head;
-	const match = /^(claude|gpt|grok|gemini|llama|mistral|qwen|glm|kimi|composer|cursor-grok|deepseek)/.exec(slug);
-	return match ? match[1] : head;
+export function isAtOrBelowBudget(level: Effort, budget: BudgetLabel): boolean {
+	return EFFORT_LADDER.indexOf(level) >= EFFORT_LADDER.indexOf(BUDGET_EFFORT[budget]);
 }
 
 /** True for the two values that mean "run on the parent chat model". */
@@ -114,74 +56,72 @@ export function isInherit(value: RoleValue): boolean {
 	return value === "inherit-parent" || value === "auto";
 }
 
-/** True when a role entry holds a list of models, one subagent per entry. */
-export function isPanel(entry: RoleEntry | undefined): entry is { readonly value: readonly RoleValue[] } {
-	return entry !== undefined && Array.isArray(entry.value);
+/** The values of a role entry, one per seat. */
+export function seatsOf(entry: RoleEntry): readonly RoleValue[] {
+	return typeof entry.value === "string" ? [entry.value] : entry.value;
 }
 
 /**
- * The upstream default role map. Upstream defaults to `claude-opus-5-5-xhigh` for prose and
- * judgment and `grok-4.7-xhigh-fast` for code work. Those slugs are Cursor-specific and are not
- * assumed to exist in Pi, so the Pi defaults name a role and a family rather than a concrete
- * slug; the setup skill resolves them against the models Pi actually has.
+ * The kind of model a role's work needs. A judgment role judges, decides, or explains, where a
+ * wrong answer costs more than a slow one. A code role runs for every edit, so it wants a
+ * capable model that is not the most expensive one.
  */
-export const UPSTREAM_ROLE_DEFAULTS: Readonly<Record<string, readonly RoleValue[]>> = {
-	"feature, refactoring": ["grok-4.7-xhigh-fast"],
-	"bug-fix": ["grok-4.7-xhigh-fast"],
-	"perf-issue": ["grok-4.7-xhigh-fast"],
-	hillclimb: ["grok-4.7-xhigh-fast"],
-	"judgment and prose": ["claude-opus-5-5-xhigh"],
-	"hardest tasks": ["claude-opus-5-5-xhigh"],
-	"how explorer": ["grok-4.7-xhigh-fast"],
-	"how explainer": ["claude-opus-5-5-xhigh"],
-	"why investigators": ["grok-4.7-xhigh-fast"],
-	"why synthesizer": ["claude-opus-5-5-xhigh"],
-	"reflect tooling": ["grok-4.7-xhigh-fast"],
-	"reflect judgment, divergent, synthesizer": ["claude-opus-5-5-xhigh"],
-	"arena runners": ["claude-opus-5-5-xhigh", "grok-4.7-xhigh-fast"],
-	"arena cross-judge pool": ["claude-opus-5-5-xhigh", "grok-4.7-xhigh-fast"],
-	"swarm workers": ["grok-4.7-xhigh-fast"],
-	"architect runners": ["claude-opus-5-5-xhigh", "grok-4.7-xhigh-fast"],
-	"interrogate reviewers": ["claude-opus-5-5-xhigh", "grok-4.7-xhigh-fast"],
-};
+export type RoleKind = "judgment" | "code";
 
-/** Roles whose value is a list. One subagent runs per entry, so the list length sets the count. */
-export const PANEL_ROLES: ReadonlySet<string> = new Set([
-	"arena runners",
-	"arena cross-judge pool",
-	"architect runners",
-	"interrogate reviewers",
-]);
-
-/** The role a playbook reads when it needs a code-writing model. */
-export const CODE_ROLES: Readonly<Record<string, string>> = {
-	"feature, refactoring": "feature, refactoring",
-	"bug-fix": "bug-fix",
-	"perf-issue": "perf-issue",
-	hillclimb: "hillclimb",
-	refactoring: "feature, refactoring",
-};
-
-/** The role a playbook reads when it needs a prose or judgment model. */
-export const JUDGMENT_ROLE = "judgment and prose";
-
-/** The role a playbook reads when it needs the strongest model available. */
-export const HARDEST_ROLE = "hardest tasks";
-
-export function readRole(map: RoleMap | undefined, role: string): RoleEntry | undefined {
-	return map?.roles[role];
+export interface RoleSpec {
+	readonly name: string;
+	readonly kind: RoleKind;
+	/** Seats in the role. More than one makes it a panel: one subagent runs per seat. */
+	readonly seats: number;
 }
 
-/** The single model for a role, or undefined when the role is missing or a panel. */
-export function singleValue(map: RoleMap | undefined, role: string): RoleValue | undefined {
-	const entry = readRole(map, role);
-	if (!entry) return undefined;
-	return isPanel(entry) ? entry.value[0] : entry.value;
-}
+/**
+ * Every role upstream's `setup-pstack` defines, with upstream's panel sizes. Upstream defaults
+ * named Cursor slugs (`claude-opus-5-5-xhigh` for judgment, `grok-4.7-xhigh-fast` for code),
+ * which do not exist in Pi, so the kind of work is what carries over.
+ */
+export const ROLES: readonly RoleSpec[] = [
+	{ name: "feature, refactoring", kind: "code", seats: 1 },
+	{ name: "bug-fix", kind: "code", seats: 1 },
+	{ name: "perf-issue", kind: "code", seats: 1 },
+	{ name: "hillclimb", kind: "code", seats: 1 },
+	{ name: "judgment and prose", kind: "judgment", seats: 1 },
+	{ name: "hardest tasks", kind: "judgment", seats: 1 },
+	{ name: "how explorer", kind: "code", seats: 1 },
+	{ name: "how explainer", kind: "judgment", seats: 1 },
+	{ name: "why investigators", kind: "code", seats: 1 },
+	{ name: "why synthesizer", kind: "judgment", seats: 1 },
+	{ name: "reflect tooling", kind: "code", seats: 1 },
+	{ name: "reflect judgment, divergent, synthesizer", kind: "judgment", seats: 1 },
+	{ name: "arena runners", kind: "code", seats: 2 },
+	{ name: "arena cross-judge pool", kind: "judgment", seats: 2 },
+	{ name: "swarm workers", kind: "code", seats: 1 },
+	{ name: "architect runners", kind: "judgment", seats: 2 },
+	{ name: "interrogate reviewers", kind: "judgment", seats: 2 },
+];
 
-/** The panel list for a role, or undefined when the role is missing or singular. */
-export function panelValues(map: RoleMap | undefined, role: string): readonly RoleValue[] | undefined {
-	const entry = readRole(map, role);
-	if (!entry) return undefined;
-	return isPanel(entry) ? entry.value : [entry.value];
+export const ROLE_NAMES: ReadonlySet<string> = new Set(ROLES.map((role) => role.name));
+
+/**
+ * Routing prefixes that a provider puts in front of a model's own name, as in
+ * `amazon-bedrock/global.anthropic.claude-opus-5-5`. They say where a request goes, not which
+ * model answers it.
+ */
+const ROUTING_PREFIX = /^(global|us|eu|au|ap|apac|jp|ca|anthropic|openai|amazon|meta|google|mistral|cohere|deepseek|qwen|xai|x-ai|moonshotai|zai|z-ai)\./;
+
+/**
+ * A model's family: its vendor lineage, such as `claude`, `gpt`, `grok`, or `gemini`.
+ *
+ * The provider is not the family. `anthropic/claude-sonnet-5-5` and
+ * `amazon-bedrock/global.anthropic.claude-sonnet-5-5` are one model reached through two
+ * providers, and a panel that seats both gets no second opinion. The family is read from the
+ * model part of the id: the last path segment, with routing prefixes and a leading `~` removed,
+ * up to its first non-letter.
+ */
+export function familyOf(id: string): string {
+	const slash = id.indexOf("/");
+	let name = (slash < 0 ? id : id.slice(slash + 1)).split("/").at(-1) ?? id;
+	name = name.toLowerCase().replace(/^~/, "");
+	while (ROUTING_PREFIX.test(name)) name = name.replace(ROUTING_PREFIX, "");
+	return /^[a-z]+/.exec(name)?.[0] ?? name;
 }

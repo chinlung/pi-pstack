@@ -1,114 +1,152 @@
 /**
- * A test for the pi-pstack extension's runtime agent registration.
+ * Tests for what the extension registers: the two runtime agents, the commands, and the tool.
  *
- * The extension registers `poteto-agent` and `comment-sicko` with pi-subagents as runtime
- * agents. The registry rejects unknown fields and colliding names loudly, so the test
- * registers the real definitions against the real registry and reads them back. A definition
- * that upstream renames therefore fails here rather than silently dropping the agent at
- * session start.
+ * The extension is loaded against a fake `ExtensionAPI` that records every registration and
+ * answers pi-subagents' registration event, so the test sees the exact definitions a real
+ * session would send.
  *
  * Run it with:
  *
- *   node --experimental-strip-types --test extension/tests/registration.test.ts
+ *   npm test
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { registerAgent } from "pi-subagents/agents";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-
-const EXTENSION_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-const PACKAGE_ROOT = dirname(EXTENSION_DIR);
+import piPstack from "../index.ts";
+import { registerRuntimeAgent } from "../runtime-agents.ts";
 
 const RUNTIME_REGISTER_EVENT = "pi-subagents:runtime-agent-register:v1";
 
-/** A minimal stand-in for the pi-subagents runtime the extension registers with. */
-function makePi() {
-	const handlers: Array<(request: unknown) => void> = [];
-	return {
+interface Recorded {
+	agents: Map<string, Record<string, unknown>>;
+	commands: Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>;
+	tools: Map<string, Record<string, unknown>>;
+	handlers: Map<string, Array<(event: unknown, ctx: unknown) => unknown>>;
+	sent: Array<{ content: unknown; options: unknown }>;
+}
+
+async function load(): Promise<Recorded> {
+	const recorded: Recorded = { agents: new Map(), commands: new Map(), tools: new Map(), handlers: new Map(), sent: [] };
+	const pi = {
 		events: {
-			emit(event: string, request: unknown) {
+			emit(event: string, request: { name: string; definition: Record<string, unknown>; result?: unknown }) {
 				if (event !== RUNTIME_REGISTER_EVENT) return;
-				for (const handler of handlers) handler(request);
+				recorded.agents.set(request.name, request.definition);
+				request.result = { ok: true, registration: { dispose() {} } };
 			},
-			on(event: string, handler: (request: unknown) => void) {
-				if (event === RUNTIME_REGISTER_EVENT) handlers.push(handler);
+			on() {
 				return () => {};
 			},
 		},
-		registerTool() {},
-		on() {
+		on(event: string, handler: (event: unknown, ctx: unknown) => unknown) {
+			recorded.handlers.set(event, [...(recorded.handlers.get(event) ?? []), handler]);
 			return () => {};
 		},
+		registerCommand(name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) {
+			recorded.commands.set(name, options);
+		},
+		registerTool(tool: Record<string, unknown>) {
+			recorded.tools.set(tool.name as string, tool);
+		},
+		sendUserMessage(content: unknown, options: unknown) {
+			recorded.sent.push({ content, options });
+		},
 	};
+	await piPstack(pi as never);
+	const ctx = { hasUI: true, ui: { notify() {} } };
+	for (const handler of recorded.handlers.get("session_start") ?? []) await handler({}, ctx);
+	return recorded;
 }
 
-/** The body of an agent file, with its frontmatter removed. */
-async function readAgentBody(name: string): Promise<string> {
-	const raw = await readFile(join(PACKAGE_ROOT, "agents", `${name}.md`), "utf8");
-	return raw.replace(/^---\n[\s\S]*?\n---\n/, "").trim();
-}
-
-test("the extension registers both pstack agents with pi-subagents", async () => {
-	const { registerRuntimeAgent } = await import("../runtime-agents.ts");
-	const pi = makePi();
-	const registered: Array<{ name: string; definition: Record<string, unknown> }> = [];
-
-	// Stand in for the pi-subagents listener the extension emits to.
-	pi.events.on(RUNTIME_REGISTER_EVENT, (request) => {
-		const typed = request as {
-			version: number;
-			name: string;
-			definition: Record<string, unknown>;
-			result?: unknown;
-		};
-		registered.push({ name: typed.name, definition: typed.definition });
-		typed.result = {
-			ok: true,
-			registration: { dispose() {} },
-		};
-	});
-
-	for (const name of ["poteto-agent", "comment-sicko"]) {
-		const body = await readAgentBody(name);
-		assert.ok(body.length > 0, `${name} has a prompt body`);
-		registerRuntimeAgent(pi, name, {
-			description: `${name} for pstack`,
-			systemPrompt: body,
-			systemPromptMode: "replace",
-			inheritProjectContext: true,
-			inheritSkills: false,
-			tools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
-			defaultContext: "fresh",
-		});
-	}
-
-	assert.deepEqual(
-		registered.map((entry) => entry.name),
-		["poteto-agent", "comment-sicko"],
-	);
-	for (const entry of registered) {
-		assert.equal(entry.definition.systemPromptMode, "replace");
-		assert.equal(entry.definition.inheritProjectContext, true);
-		assert.equal(entry.definition.inheritSkills, false);
+test("both agents register with the absolute paths of the skills they read", async () => {
+	const { agents } = await load();
+	assert.deepEqual([...agents.keys()], ["poteto-agent", "comment-sicko"]);
+	const expected: Record<string, string[]> = { "poteto-agent": ["poteto-mode"], "comment-sicko": ["how", "why"] };
+	for (const [name, definition] of agents) {
+		const prompt = definition.systemPrompt as string;
+		for (const skill of expected[name]) {
+			const path = new RegExp(`\`${skill}\` skill: (\\S+/skills/${skill}/SKILL\\.md)`).exec(prompt)?.[1];
+			assert.ok(path, `${name} names the ${skill} skill's path`);
+			assert.ok(existsSync(path), `${path} exists`);
+		}
 	}
 });
 
-test("registration fails loudly when pi-subagents is absent", async () => {
-	const { registerRuntimeAgent } = await import("../runtime-agents.ts");
-	const pi = makePi();
-	// No listener, so the request gets no result.
-	assert.throws(
-		() => registerRuntimeAgent(pi, "poteto-agent", { description: "x", systemPrompt: "y" }),
-		/pi-subagents is not installed or not ready/,
+test("both agents can fan out, and only poteto-agent runs in the background by default", async () => {
+	const { agents } = await load();
+	for (const definition of agents.values()) {
+		assert.equal(definition.allowNestedSubagents, true);
+		assert.equal(definition.systemPromptMode, "replace");
+		assert.equal(definition.inheritSkills, false);
+	}
+	assert.equal(agents.get("poteto-agent")?.defaultAsync, true);
+	assert.equal(agents.get("comment-sicko")?.defaultAsync, false);
+	// comment-sicko reports and never edits.
+	assert.deepEqual(
+		(agents.get("comment-sicko")?.tools as string[]).filter((tool) => ["edit", "write", "bash"].includes(tool)),
+		[],
 	);
 });
 
 test("the agent prompts name no Cursor-only feature", async () => {
-	for (const name of ["poteto-agent", "comment-sicko"]) {
-		const body = await readAgentBody(name);
-		assert.doesNotMatch(body, /\.cursor\//, `${name} names a Cursor path`);
-		assert.doesNotMatch(body, /subagent_type/, `${name} names a Cursor subagent type`);
-		assert.doesNotMatch(body, /`Task`/, `${name} names the Cursor Task tool`);
+	const { agents } = await load();
+	for (const [name, definition] of agents) {
+		const prompt = definition.systemPrompt as string;
+		assert.doesNotMatch(prompt, /\.cursor|subagent_type|`Task`|\bCursor\b/, name);
 	}
+});
+
+test("the package manifest declares no agent files that would collide with the runtime agents", () => {
+	const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+	assert.equal(manifest.pi?.subagents, undefined);
+	assert.equal(manifest["pi-subagents"], undefined);
+});
+
+test("the extension registers its commands and its read-only tool", async () => {
+	const { commands, tools } = await load();
+	assert.deepEqual([...commands.keys()].sort(), ["poteto-mode", "pstack-models", "setup-pstack"]);
+	const tool = tools.get("pstack_models");
+	assert.ok(tool?.outputSchema, "pstack_models declares an output schema");
+	assert.deepEqual(tool?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+});
+
+test("/poteto-mode expands the hidden skill through /skill:", async () => {
+	const { commands, sent } = await load();
+	await commands.get("poteto-mode")?.handler("fix the flaky test", { hasUI: true, isIdle: () => true, ui: { notify() {} } });
+	assert.deepEqual(sent, [{ content: "/skill:poteto-mode fix the flaky test", options: { expandPromptTemplates: true } }]);
+});
+
+test("/poteto-mode does not queue a run while the agent is busy", async () => {
+	const { commands, sent } = await load();
+	await commands.get("poteto-mode")?.handler("fix it", { hasUI: true, isIdle: () => false, ui: { notify() {} } });
+	assert.deepEqual(sent, []);
+});
+
+test("registration fails loudly when pi-subagents is absent", () => {
+	assert.throws(
+		() => registerRuntimeAgent({ events: { emit() {} } }, "poteto-agent", { description: "x", systemPrompt: "y" }),
+		/pi-subagents is not installed or not ready/,
+	);
+});
+
+test("pi-subagents' real registry accepts both agent definitions", async () => {
+	const { agents } = await load();
+	const host = { on() {}, registerTool() {} };
+	for (const [name, definition] of agents) {
+		const registration = registerAgent({ pi: host as never, name, definition: definition as never });
+		registration.dispose();
+	}
+});
+
+test("pstack_models returns one parent seat per seat for a panel role missing from the map", async () => {
+	process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-pstack-"));
+	const { tools } = await load();
+	const tool = tools.get("pstack_models") as { execute: (...args: unknown[]) => Promise<{ structuredContent: { roles: Array<{ role: string; seats: unknown[] }> } }> };
+	const ctx = { scopedModels: [], modelRegistry: { getAvailable: () => [], hasConfiguredAuth: () => false } };
+	const result = await tool.execute("id", { role: "arena runners" }, undefined, undefined, ctx);
+	assert.deepEqual(result.structuredContent.roles, [{ role: "arena runners", seats: [{ kind: "parent" }, { kind: "parent" }] }]);
+	await assert.rejects(tool.execute("id", { role: "no such role" }, undefined, undefined, ctx), /unknown pstack role/);
 });
