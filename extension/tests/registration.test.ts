@@ -10,9 +10,10 @@
  *   npm test
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { ROLES } from "../roles.ts";
 import { registerAgent } from "pi-subagents/agents";
 import { test } from "node:test";
 import piPstack from "../index.ts";
@@ -175,4 +176,49 @@ test("pstack_models without a role returns every role, parents included, and car
 	assert.equal(result.structuredContent.roles.length, 17);
 	assert.deepEqual(result.structuredContent.roles.find((entry) => entry.role === "interrogate reviewers")?.seats, [{ kind: "parent" }, { kind: "parent" }]);
 	assert.match(result.content[0].text, /interrogate reviewers: parent model, parent model/);
+});
+
+test("a skill alias does not queue a run while the agent is busy", async () => {
+	const { commands, sent } = await load();
+	await commands.get("how")?.handler("why?", { hasUI: true, isIdle: () => false, ui: { notify() {} } });
+	assert.deepEqual(sent, []);
+});
+
+function writeStoredMap(map: unknown): void {
+	const dir = mkdtempSync(join(tmpdir(), "pi-pstack-"));
+	process.env.PI_CODING_AGENT_DIR = dir;
+	const file = join(dir, "state", "pi-pstack", "models.json");
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, JSON.stringify(map));
+}
+
+test("pstack_models puts store warnings in the text the model reads", async () => {
+	writeStoredMap({ budget: "large", roles: { "no such role": "inherit-parent" } });
+	const { tools } = await load();
+	const tool = tools.get("pstack_models") as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; structuredContent: { warnings: string[] } }> };
+	const ctx = { scopedModels: [], modelRegistry: { getAvailable: () => [], hasConfiguredAuth: () => false } };
+	const result = await tool.execute("id", {}, undefined, undefined, ctx);
+	assert.equal(result.structuredContent.warnings.length, 1);
+	assert.match(result.content[0].text, /^warning: dropped retired role "no such role"/);
+});
+
+test("/setup-pstack reports a stored :level suffix as ignored", async () => {
+	writeStoredMap({ budget: "large", roles: { [ROLES[0].name]: "openai/gpt-x:xhigh" } });
+	const { commands } = await load();
+	const notes: Array<{ message: string; level: string }> = [];
+	const hostModel = { provider: "openai", id: "gpt-x", reasoning: true, thinkingLevels: ["high", "xhigh"], cost: { input: 1, output: 1 } };
+	const ctx = {
+		hasUI: false,
+		ui: { notify: (message: string, level: string) => notes.push({ message, level }) },
+		scopedModels: [{ model: hostModel }],
+		modelRegistry: { getAvailable: () => [hostModel], hasConfiguredAuth: () => true },
+	};
+	const stderr = process.stderr.write.bind(process.stderr);
+	process.stderr.write = (() => true) as never;
+	try {
+		await commands.get("setup-pstack")?.handler("", ctx);
+	} finally {
+		process.stderr.write = stderr;
+	}
+	assert.ok(notes.some((note) => note.level === "warning" && /:xhigh suffix is ignored/.test(note.message)), JSON.stringify(notes));
 });

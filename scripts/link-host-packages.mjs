@@ -30,14 +30,14 @@ function agentDir() {
  * The release directory the installed Pi runs. A version file is the authority: picking the
  * newest folder by name would sort `1.10.0` before `1.9.0`.
  */
-function releaseDir() {
-	const current = join(agentDir(), "install", "current-version");
-	const versionFile = existsSync(current) ? current : join(agentDir(), "PI_VERSION");
+export function releaseDir(root = agentDir()) {
+	const current = join(root, "install", "current-version");
+	const versionFile = existsSync(current) ? current : join(root, "PI_VERSION");
 	if (!existsSync(versionFile)) {
 		throw new Error(`cannot find ${current} or PI_VERSION; is Pi installed for this user?`);
 	}
 	const version = readFileSync(versionFile, "utf8").trim();
-	const dir = join(agentDir(), "install", "releases", version);
+	const dir = join(root, "install", "releases", version);
 	if (!existsSync(dir)) throw new Error(`${versionFile} names ${version}, but ${dir} does not exist`);
 	return dir;
 }
@@ -59,6 +59,9 @@ function link(name, source) {
 	console.log(`linked ${name} -> ${source}`);
 }
 
-const release = releaseDir();
-for (const name of HOST_PACKAGES) link(name, join(release, "node_modules", name));
-for (const name of AGENT_PACKAGES) link(name, join(agentDir(), "npm", "node_modules", name));
+// Import-safe: the tests call `releaseDir` without creating links in this repo.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	const release = releaseDir();
+	for (const name of HOST_PACKAGES) link(name, join(release, "node_modules", name));
+	for (const name of AGENT_PACKAGES) link(name, join(agentDir(), "npm", "node_modules", name));
+}

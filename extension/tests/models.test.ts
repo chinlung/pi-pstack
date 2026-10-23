@@ -12,8 +12,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaultRoleMap, duplicateModels, levelFor, resolveRoleMap, resolveValue, strengthOf, type CatalogModel } from "../models.ts";
-import { familyOf, ROLES, type Effort } from "../roles.ts";
+import { completeRoles, defaultRoleMap, duplicateModels, levelFor, resolveRoleMap, resolveValue, strengthOf, type CatalogModel } from "../models.ts";
+import { familyOf, ROLES, type Effort, type RoleEntry } from "../roles.ts";
 
 const FULL: readonly Effort[] = ["max", "xhigh", "high", "medium", "low", "minimal", "off"];
 
@@ -158,4 +158,17 @@ test("a panel that seats one model twice is reported, a parent seat is not a mod
 	assert.deepEqual(duplicateModels([seat("a/x"), seat("a/x")]), ["a/x"]);
 	assert.deepEqual(duplicateModels([seat("a/x"), seat("b/y")]), []);
 	assert.deepEqual(duplicateModels([{ kind: "parent" }, { kind: "parent" }]), []);
+});
+
+test("completeRoles lists every role in table order and seats a missing one on the parent", () => {
+	const seats = Array.from({ length: ROLES[1].seats }, () => "openai/gpt-6-sol");
+	const entry: RoleEntry = ROLES[1].seats === 1 ? { value: seats[0] } : { value: seats };
+	const named = resolveRoleMap(CATALOG, { budget: "large", roles: { [ROLES[1].name]: entry } });
+	const all = completeRoles(named);
+	assert.deepEqual(all.map((entry) => entry.role), ROLES.map((role) => role.name));
+	assert.equal(all[1].seats[0].kind, "model");
+	for (const [index, spec] of ROLES.entries()) {
+		if (index === 1) continue;
+		assert.deepEqual(all[index].seats, Array.from({ length: spec.seats }, () => ({ kind: "parent" })));
+	}
 });
