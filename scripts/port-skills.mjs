@@ -179,6 +179,30 @@ const REPLACEMENTS = [
  * global table for text the global table cannot express.
  */
 const FILE_RULES = [
+	{
+		match: "skills/ketchup/SKILL.md",
+		rules: [
+			["a chart or diagram from `/visualize`", "a chart or diagram made with a rendering tool available in this session"],
+			["a `/visualize` chart for numbers.", "a chart made with a rendering tool available in this session for numbers. If no rendering tool is available, report the numbers in plain text."],
+		],
+	},
+	...[
+		["skills/poteto-mode/playbooks/babysit.md", /(?<!\/)scripts\/watch-pr\/watch-pr/g, 'bun "<pstack>/skills/poteto-mode/scripts/watch-pr/watch-pr"'],
+		["skills/poteto-mode/playbooks/shipping.md", /(?<!\/)scripts\/watch-pr\/watch-pr/g, 'bun "<pstack>/skills/poteto-mode/scripts/watch-pr/watch-pr"'],
+		["skills/poteto-mode/playbooks/orchestrate.md", /(?<!\/)scripts\/orch\/orch\.ts/g, '"<pstack>/skills/poteto-mode/scripts/orch/orch.ts"'],
+		["skills/poteto-mode/playbooks/worktree-cleanup.md", /(?<!\/)scripts\/worktree-audit\.sh/g, 'bash "<pstack>/skills/poteto-mode/scripts/worktree-audit.sh"'],
+		["skills/show-me-your-work/SKILL.md", /(?<!\/)scripts\/log\.sh/g, 'bash "<pstack>/skills/show-me-your-work/scripts/log.sh"'],
+	].map(([match, source, target]) => ({
+		match,
+		rules: [[source, target]],
+	})),
+	{
+		match: "skills/poteto-mode/playbooks/multi-phase-plan.md",
+		rules: [
+			["`../references/bugbot-triage.md`", "`<pstack>/skills/poteto-mode/references/bugbot-triage.md`"],
+			[/`playbooks\/shipping\.md`/g, "`<pstack>/skills/poteto-mode/playbooks/shipping.md`"],
+		],
+	},
 	// The rules below run against upstream's own text, before the global table.
 	{
 		match: "skills/poteto-mode/scripts/worktree-audit.sh",

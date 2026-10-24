@@ -76,6 +76,8 @@ You cannot run `/pstack-models` or `/setup-pstack` yourself. They are the user's
 
 ## Paths
 
+Resolve `<pstack>` to the installed pi-pstack package's absolute path before reading a file or running a command. This package's `docs/harness/pi.md` is not a Pi core document. Resolve Markdown links from the file containing the link. Resolve skill-root-relative references such as `references/...` from that skill's `SKILL.md` directory. Pass resolved absolute file paths to subagents. Run bundled tools through their stated interpreter, quote the path, and keep the target project's working directory. In a generated plan, replace every `<pstack>` placeholder with that absolute package path so references still work after the plan moves.
+
 | Cursor | Pi |
 | --- | --- |
 | `.cursor/skills/`, `~/.cursor/skills/` | `.pi/skills/`, `~/.pi/agent/skills/`, or the pi-pstack package's `skills/` |
@@ -96,7 +98,7 @@ Bugbot and the agentic security review are review bots, not features of the edit
 | Bugbot and the agentic security review | Their comments on a GitHub PR are ordinary review threads, so triage them with the forge command that the step gives and the rules in `<pstack>/skills/poteto-mode/references/bugbot-triage.md`. Skip a step that starts, waits for, or configures either bot when the PR has no such check or comment. |
 | Cursor cloud agents | `worktree: true` maps to a worktree. Skip a step that needs the cloud agent itself, such as its dashboard status or its own machine. |
 | A built-in PR tool | Use the forge command that the step gives, such as `gh pr create`. That is not a skip, so write no line. |
-| The `/loop` command | A polling watcher. A subagent that waits polls the condition it cares about and reports when the condition holds. The multi-phase plan template keeps the literal `` `/loop 1h` `` on purpose: `scripts/check-plan.mjs` requires that marker, so a plan written in Pi still carries it and the coordinator arms the audit tick as an hourly polling watcher. |
+| The `/loop` command | A polling watcher. A subagent that waits polls the condition it cares about and reports when the condition holds. The multi-phase plan template keeps the literal `` `/loop 1h` `` on purpose: `<pstack>/skills/poteto-mode/scripts/check-plan.mjs` requires that marker, so a plan written in Pi still carries it and the coordinator arms the audit tick as an hourly polling watcher. |
 | `cursor-team-kit`'s `deslop` skill | The `unslop` skill, then the project's own formatter and linter. |
 | `create-skill`, Cursor's built-in skill-authoring skill | Pi has none. Follow Pi's skill format, described in the Pi package's `docs/skills.md`: a folder with a `SKILL.md` whose frontmatter has `name` and `description`. Use the `writing-skills` skill when the session has it. The routing labels in **reflect**'s templates, such as `new skill via create-skill:`, keep the name so the templates still match one another. |
 | `cursor-team-kit`'s `control-cli` and `control-ui` skills | Drive the surface with the project's own scripts or the `bash` tool. |

@@ -138,7 +138,7 @@ npm run check:skills # 確認生成產物是最新的
 3. 每條替換規則都必須至少改到一個檔案，否則 port 失敗。上游改了文字、或前面的規則先改掉了它，這條規則就已經不做它作者以為的事；不檢查的話，它會安靜地失效。
 4. 相對連結（inline 連結、圖片、reference-style 定義、`<…>` 包起來的目標）都必須指向這次 port 會產出、或套件根目錄手寫的檔案；生成目錄裡即將被刪除的舊檔不算。指向上游有、但沒移植的部分（目前只有 `automations/`）會改寫成上游的 GitHub 網址；其他找不到的目標都是拼錯或搬走的檔案，port 直接失敗，避免把讀者帶到一個 404。
 
-有一個刻意保留的例外：multi-phase plan 樣板裡的 `` `/loop 1h` ``。`scripts/check-plan.mjs` 拿它當必要標記驗證計畫，替換掉會讓每份照樣板寫的計畫都檢查失敗。Pi 端的意思由 `docs/harness/pi.md` 的 `/loop` 那一列說明（改用每小時一次的 polling watcher）。
+有一個刻意保留的例外：multi-phase plan 樣板裡的 `` `/loop 1h` ``。`skills/poteto-mode/scripts/check-plan.mjs` 拿它當必要標記驗證計畫，替換掉會讓每份照樣板寫的計畫都檢查失敗。Pi 端的意思由 `docs/harness/pi.md` 的 `/loop` 那一列說明（改用每小時一次的 polling watcher）。
 
 `upstream/` 保持上游原樣，`overrides/` 放的是機械式移植做不到的檔案。目前有 `setup-pstack` 與 `poteto-help`。`setup-pstack` 上游那一版的每一步都是 Cursor 專屬的（寫 always-applied rule、從 Cursor 偵測模型），所以是整份重寫，不是改寫。
 
