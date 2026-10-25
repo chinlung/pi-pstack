@@ -7,12 +7,12 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUDGET_EFFORT, EFFORT_LADDER, isAtOrBelowBudget, isInherit, ROLE_NAMES, ROLES, seatsOf, type RoleEntry, type RoleMap } from "../roles.ts";
+import { BUDGET_EFFORT, EFFORT_LADDER, isAtOrBelowBudget, isInherit, ROLES, seatsOf, type RoleEntry, type RoleMap } from "../roles.ts";
 import { normalizeEntry, supportedLevels } from "../models.ts";
 import { mergeRoleMaps, parseRoleMap, readRoleMap, roleMapPath, writeRoleMap } from "../store.ts";
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { readdirSync, writeFileSync } from "node:fs";
+import { useAgentDir } from "./agent-dir.ts";
+import { dirname } from "node:path";
 
 test("the effort ladder runs from most to least reasoning", () => {
 	assert.deepEqual([...EFFORT_LADDER], ["max", "xhigh", "high", "medium", "low", "minimal", "off"]);
@@ -137,12 +137,22 @@ test("a stored role with the wrong number of seats is dropped and reported", () 
 	assert.match(parsed.warnings[0], /"bug-fix": it has 2 model\(s\), and the role takes 1/);
 });
 
-test("every role name in the table is known to the parser", () => {
-	for (const role of ROLES) assert.ok(ROLE_NAMES.has(role.name));
+test("concurrent saves publish complete role maps without sharing temporary files", async (t) => {
+	useAgentDir(t);
+	const maps: RoleMap[] = Array.from({ length: 16 }, (_, index) => ({
+		budget: "large",
+		roles: { "bug-fix": { value: `provider/model-${index}` } },
+	}));
+	const results = await Promise.allSettled(maps.map(writeRoleMap));
+	assert.deepEqual(results.map((result) => result.status), maps.map(() => "fulfilled"));
+	const stored = await readRoleMap();
+	assert.deepEqual(stored.warnings, []);
+	assert.ok(maps.some((map) => JSON.stringify(map) === JSON.stringify(stored.map)));
+	assert.deepEqual(readdirSync(dirname(roleMapPath())), ["models.json"]);
 });
 
-test("the role map round-trips through disk, and a broken file is reported, not ignored", async () => {
-	process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-pstack-"));
+test("the role map round-trips through disk, and a broken file is reported, not ignored", async (t) => {
+	useAgentDir(t);
 	assert.deepEqual(await readRoleMap(), { warnings: [] });
 	const map: RoleMap = { budget: "medium", roles: { "bug-fix": { value: "openai/gpt-6-sol" } } };
 	await writeRoleMap(map);

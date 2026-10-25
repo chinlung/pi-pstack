@@ -129,7 +129,9 @@ npm run port:skills  # 重新產生 skills/、agents/、docs/guide/
 npm run check:skills # 確認生成產物是最新的
 ```
 
-`typecheck` 與 `test` 會先跑 `scripts/link-host-packages.mjs`，把 Pi 提供給 extension 的套件（`@earendil-works/pi-coding-agent`、`typebox`）從 `~/.pi/agent/PI_VERSION` 指定的版本連進 `node_modules`，並連入 `~/.pi/agent/npm` 下安裝的 `pi-subagents`，讓測試用它真正的 runtime agent registry 驗證兩個 agent 的定義。這些套件由 Pi 在執行時提供，不能列為 dependency；`npm install` 會清掉這些連結，所以每次都重建。
+`typecheck` 與 `test` 會先跑 `scripts/link-host-packages.mjs`，把 Pi 提供給 extension 的套件（`@earendil-works/pi-coding-agent`、`typebox`）依 `~/.pi/agent/install/current-version` 選擇 release（該檔不存在時才回退到 `PI_VERSION`），連進 `node_modules`；另連入 `~/.pi/agent/npm` 下安裝的 `pi-subagents`，讓測試用它真正的 runtime agent registry 驗證兩個 agent 的定義。這些套件由 Pi 在執行時提供，不能列為 dependency；`npm install` 會清掉這些連結，所以每次都重建。
+
+worktree 稽核的回歸測試會執行 Bash 腳本，需在 `PATH` 中提供 `bash`、`jq` 與 `rg`（ripgrep）；Git 與 forge 回應使用受控測試輸入，不會操作真實倉庫或連線。
 
 `port:skills` 會做四件事：
 
@@ -140,7 +142,7 @@ npm run check:skills # 確認生成產物是最新的
 
 有一個刻意保留的例外：multi-phase plan 樣板裡的 `` `/loop 1h` ``。`skills/poteto-mode/scripts/check-plan.mjs` 拿它當必要標記驗證計畫，替換掉會讓每份照樣板寫的計畫都檢查失敗。Pi 端的意思由 `docs/harness/pi.md` 的 `/loop` 那一列說明（改用每小時一次的 polling watcher）。
 
-`upstream/` 保持上游原樣，`overrides/` 放的是機械式移植做不到的檔案。目前有 `setup-pstack` 與 `poteto-help`。`setup-pstack` 上游那一版的每一步都是 Cursor 專屬的（寫 always-applied rule、從 Cursor 偵測模型），所以是整份重寫，不是改寫。
+`upstream/` 保持上游原樣，`overrides/` 放的是機械式移植做不到的檔案。目前有 `setup-pstack`、`poteto-help` 與 `worktree-audit.sh`；稽核腳本直接維護為 Bash，避免以多段字串替換拼接清理判斷。`setup-pstack` 上游那一版的每一步都是 Cursor 專屬的（寫 always-applied rule、從 Cursor 偵測模型），所以是整份重寫，不是改寫。
 
 ## 與上游同步
 

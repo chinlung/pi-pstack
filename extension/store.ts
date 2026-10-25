@@ -5,6 +5,7 @@
  * file, so the map lives as JSON under the Pi agent directory, where it survives reloads and is
  * shared by every session of the same user.
  */
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -105,7 +106,7 @@ export async function readRoleMap(): Promise<ParsedRoleMap> {
 export async function writeRoleMap(map: RoleMap): Promise<void> {
 	const path = roleMapPath();
 	await mkdir(dirname(path), { recursive: true });
-	const temporary = `${path}.${process.pid}.tmp`;
+	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
 	try {
 		await writeFile(temporary, `${JSON.stringify(map, null, 2)}\n`, "utf8");
 		await rename(temporary, path);

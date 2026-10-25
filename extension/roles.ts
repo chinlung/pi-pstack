@@ -100,14 +100,12 @@ export const ROLES: readonly RoleSpec[] = [
 	{ name: "interrogate reviewers", kind: "judgment", seats: 2 },
 ];
 
-export const ROLE_NAMES: ReadonlySet<string> = new Set(ROLES.map((role) => role.name));
-
 /**
  * Routing prefixes that a provider puts in front of a model's own name, as in
  * `amazon-bedrock/global.anthropic.claude-opus-5-5`. They say where a request goes, not which
  * model answers it.
  */
-const ROUTING_PREFIX = /^(global|us|eu|au|ap|apac|jp|ca|anthropic|openai|amazon|meta|google|mistral|cohere|deepseek|qwen|xai|x-ai|moonshotai|zai|z-ai)\./;
+const ROUTING_PREFIX = /^(global|us|eu|au|ap|apac|jp|ca|anthropic|openai|amazon|meta|google|mistral|cohere|deepseek|qwen|xai|x-ai|moonshotai|zai|z-ai)[./]/;
 
 /**
  * A model's family: its vendor lineage, such as `claude`, `gpt`, `grok`, or `gemini`.
@@ -119,9 +117,14 @@ const ROUTING_PREFIX = /^(global|us|eu|au|ap|apac|jp|ca|anthropic|openai|amazon|
  * up to its first non-letter.
  */
 export function familyOf(id: string): string {
-	const slash = id.indexOf("/");
-	let name = (slash < 0 ? id : id.slice(slash + 1)).split("/").at(-1) ?? id;
-	name = name.toLowerCase().replace(/^~/, "");
-	while (ROUTING_PREFIX.test(name)) name = name.replace(ROUTING_PREFIX, "");
+	const name = modelNameOf(id).split("/").at(-1) ?? id;
 	return /^[a-z]+/.exec(name)?.[0] ?? name;
+}
+
+/** A model name without provider/routing prefixes; unknown vendor namespaces stay distinct. */
+export function modelNameOf(id: string): string {
+	const slash = id.indexOf("/");
+	let name = (slash < 0 ? id : id.slice(slash + 1)).toLowerCase().replace(/^~/, "");
+	while (ROUTING_PREFIX.test(name)) name = name.replace(ROUTING_PREFIX, "");
+	return name;
 }

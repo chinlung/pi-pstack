@@ -76,6 +76,31 @@ test("code roles take a mid-priced model, not the cheapest or the priciest", () 
 	assert.equal(picked.value, "openai/gpt-6-sol");
 });
 
+test("code roles choose the lower median when an even number of models tie", () => {
+	const two = [model("a/cheap", 1), model("b/expensive", 100)];
+	assert.deepEqual(defaultRoleMap(two, "large").roles["bug-fix"], { value: "a/cheap" });
+	const four = [...two, model("c/lower-middle", 10), model("d/upper-middle", 50)];
+	assert.deepEqual(defaultRoleMap(four, "large").roles["bug-fix"], { value: "c/lower-middle" });
+});
+
+test("a panel prefers another model over a second provider route to the same model", () => {
+	const models = [
+		model("anthropic/claude-haiku-5-5", 1),
+		model("anthropic/claude-opus-5-5", 44),
+		model("amazon-bedrock/global.anthropic.claude-opus-5-5", 44),
+	];
+	assert.deepEqual(defaultRoleMap(models, "large").roles["interrogate reviewers"], {
+		value: ["amazon-bedrock/global.anthropic.claude-opus-5-5", "anthropic/claude-haiku-5-5"],
+	});
+});
+
+test("different vendor namespaces are not collapsed just because their model basenames match", () => {
+	const models = [model("openrouter/vendor-a/same-name", 30), model("openrouter/vendor-b/same-name", 20)];
+	assert.deepEqual(defaultRoleMap(models, "large").roles["interrogate reviewers"], {
+		value: ["openrouter/vendor-a/same-name", "openrouter/vendor-b/same-name"],
+	});
+});
+
 test("a non-panel role is not limited to the alphabetically first family", () => {
 	// `amazon-bedrock` sorts first; its only model must not win just because of that.
 	const map = defaultRoleMap(CATALOG, "medium");
@@ -157,6 +182,13 @@ test("a panel that seats one model twice is reported, a parent seat is not a mod
 	const seat = (id: string) => ({ kind: "model" as const, id, spec: id, level: undefined, aboveBudget: false });
 	assert.deepEqual(duplicateModels([seat("a/x"), seat("a/x")]), ["a/x"]);
 	assert.deepEqual(duplicateModels([seat("a/x"), seat("b/y")]), []);
+	assert.deepEqual(duplicateModels([
+		seat("openrouter/vendor-a/same-name"), seat("openrouter/vendor-b/same-name"),
+	]), []);
+	assert.deepEqual(duplicateModels([
+		seat("anthropic/claude-opus-5-5"),
+		seat("amazon-bedrock/global.anthropic.claude-opus-5-5"),
+	]), ["amazon-bedrock/global.anthropic.claude-opus-5-5"]);
 	assert.deepEqual(duplicateModels([{ kind: "parent" }, { kind: "parent" }]), []);
 });
 

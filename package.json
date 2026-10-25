@@ -1,6 +1,7 @@
 {
 	"name": "pi-pstack",
 	"version": "0.1.0",
+	"type": "module",
 	"description": "pstack for Pi: rigorous, verifiable engineering workflows. Model-aware playbooks, deliberate subagents, unslopped prose, and proof before done.",
 	"license": "MIT",
 	"keywords": [

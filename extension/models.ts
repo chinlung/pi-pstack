@@ -6,9 +6,9 @@
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-	BUDGET_EFFORT,
 	EFFORT_LADDER,
 	familyOf,
+	modelNameOf,
 	isAtOrBelowBudget,
 	isInherit,
 	isLevel,
@@ -147,7 +147,7 @@ export function pick(pool: readonly CatalogModel[], kind: RoleKind, budget: Budg
 	const top = strengthOf(best.thinkingLevels, budget);
 	const tied = ranked.filter((model) => strengthOf(model.thinkingLevels, budget) === top);
 	const byCost = [...tied].sort((a, b) => a.cost - b.cost || a.id.localeCompare(b.id));
-	return byCost[Math.floor(byCost.length / 2)];
+	return byCost[Math.floor((byCost.length - 1) / 2)];
 }
 
 /**
@@ -165,8 +165,9 @@ export function pickPanel(models: readonly CatalogModel[], kind: RoleKind, budge
 	const chosen: CatalogModel[] = [];
 	for (let seat = 0; seat < seats; seat++) {
 		const family = order[seat];
-		const unused = models.filter((model) => !chosen.includes(model));
-		const next = family ? pick(family.pool.filter((model) => !chosen.includes(model)), kind, budget) : pick(unused, kind, budget);
+		const used = new Set(chosen.map((model) => modelNameOf(model.id)));
+		const unused = models.filter((model) => !used.has(modelNameOf(model.id)));
+		const next = family ? pick(family.pool.filter((model) => unused.includes(model)), kind, budget) : undefined;
 		const fallback = next ?? pick(unused, kind, budget) ?? pick(models, kind, budget);
 		if (fallback) chosen.push(fallback);
 	}
@@ -243,8 +244,15 @@ export function completeRoles(resolved: readonly ResolvedRole[]): ResolvedRole[]
 
 /** The model ids that more than one seat of a role names, so setup can say a panel is one model twice. */
 export function duplicateModels(seats: readonly ResolvedSeat[]): string[] {
-	const ids = seats.flatMap((seat) => (seat.kind === "model" ? [seat.id] : []));
-	return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+	const seen = new Set<string>();
+	const duplicates: string[] = [];
+	for (const seat of seats) {
+		if (seat.kind !== "model") continue;
+		const name = modelNameOf(seat.id);
+		if (seen.has(name)) duplicates.push(seat.id);
+		seen.add(name);
+	}
+	return [...new Set(duplicates)];
 }
 
 /** One seat of a resolved role, ready to launch. */
@@ -303,5 +311,3 @@ export function normalizeEntry(models: readonly CatalogModel[], entry: RoleEntry
 	}
 	return typeof entry.value === "string" ? { value: seats[0] } : { value: seats };
 }
-
-export { BUDGET_EFFORT };

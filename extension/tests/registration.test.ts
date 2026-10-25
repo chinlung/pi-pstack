@@ -10,12 +10,12 @@
  *   npm test
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { useAgentDir } from "./agent-dir.ts";
 import { dirname, join } from "node:path";
 import { ROLES } from "../roles.ts";
 import { registerAgent } from "pi-subagents/agents";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import piPstack from "../index.ts";
 import { registerRuntimeAgent } from "../runtime-agents.ts";
 
@@ -146,8 +146,8 @@ test("pi-subagents' real registry accepts both agent definitions", async () => {
 	}
 });
 
-test("pstack_models returns one parent seat per seat for a panel role missing from the map", async () => {
-	process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-pstack-"));
+test("pstack_models returns one parent seat per seat for a panel role missing from the map", async (t) => {
+	useAgentDir(t);
 	const { tools } = await load();
 	const tool = tools.get("pstack_models") as { execute: (...args: unknown[]) => Promise<{ structuredContent: { roles: Array<{ role: string; seats: unknown[] }> } }> };
 	const ctx = { scopedModels: [], modelRegistry: { getAvailable: () => [], hasConfiguredAuth: () => false } };
@@ -167,8 +167,8 @@ test("a skill alias sends the long form, with and without arguments", async () =
 	);
 });
 
-test("pstack_models without a role returns every role, parents included, and carries warnings in its text", async () => {
-	process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-pstack-"));
+test("pstack_models without a role returns every role, parents included, and carries warnings in its text", async (t) => {
+	useAgentDir(t);
 	const { tools } = await load();
 	const tool = tools.get("pstack_models") as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; structuredContent: { roles: Array<{ role: string; seats: unknown[] }> } }> };
 	const ctx = { scopedModels: [], modelRegistry: { getAvailable: () => [], hasConfiguredAuth: () => false } };
@@ -184,16 +184,15 @@ test("a skill alias does not queue a run while the agent is busy", async () => {
 	assert.deepEqual(sent, []);
 });
 
-function writeStoredMap(map: unknown): void {
-	const dir = mkdtempSync(join(tmpdir(), "pi-pstack-"));
-	process.env.PI_CODING_AGENT_DIR = dir;
+function writeStoredMap(t: TestContext, map: unknown): void {
+	const dir = useAgentDir(t);
 	const file = join(dir, "state", "pi-pstack", "models.json");
 	mkdirSync(dirname(file), { recursive: true });
 	writeFileSync(file, JSON.stringify(map));
 }
 
-test("pstack_models puts store warnings in the text the model reads", async () => {
-	writeStoredMap({ budget: "large", roles: { "no such role": "inherit-parent" } });
+test("pstack_models puts store warnings in the text the model reads", async (t) => {
+	writeStoredMap(t, { budget: "large", roles: { "no such role": "inherit-parent" } });
 	const { tools } = await load();
 	const tool = tools.get("pstack_models") as { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; structuredContent: { warnings: string[] } }> };
 	const ctx = { scopedModels: [], modelRegistry: { getAvailable: () => [], hasConfiguredAuth: () => false } };
@@ -202,8 +201,8 @@ test("pstack_models puts store warnings in the text the model reads", async () =
 	assert.match(result.content[0].text, /^warning: dropped retired role "no such role"/);
 });
 
-test("/setup-pstack reports a stored :level suffix as ignored", async () => {
-	writeStoredMap({ budget: "large", roles: { [ROLES[0].name]: "openai/gpt-x:xhigh" } });
+test("/setup-pstack reports a stored :level suffix as ignored", async (t) => {
+	writeStoredMap(t, { budget: "large", roles: { [ROLES[0].name]: "openai/gpt-x:xhigh" } });
 	const { commands } = await load();
 	const notes: Array<{ message: string; level: string }> = [];
 	const hostModel = { provider: "openai", id: "gpt-x", reasoning: true, thinkingLevels: ["high", "xhigh"], cost: { input: 1, output: 1 } };

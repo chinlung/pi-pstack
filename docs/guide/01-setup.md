@@ -26,7 +26,7 @@ The defaults run at `xhigh` reasoning, the same as the `large` budget. `unlimite
 
 You only override what you care about. A role with no entry in the map keeps the skill's default. To restore a default, delete that role's entry. A rerun of `/setup-pstack` keeps any role whose model differs from the default. When a default changes, a map written before the change still pins the old default, so delete those role entries, or delete the file, then run `/setup-pstack` again.
 
-You might be wondering what happens if you use Auto. Set a role to `inherit-parent` or `auto` and pstack omits the subagent `model` field, so the subagent inherits your parent chat model. Both values mean the same thing, and neither is a model slug. For a panel role the value is a list, and one subagent runs per entry, so the list length sets the panel size. Each panel has a fixed size of two seats, and a list of another length is dropped. Each panel has a fixed size of two seats, and a list of another length is dropped. Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
+You might be wondering what happens if you use Auto. Set a role to `inherit-parent` or `auto` and pstack omits the subagent `model` field, so the subagent inherits your parent chat model. Both values mean the same thing, and neither is a model slug. For a panel role the value is a list, and one subagent runs per entry, so list length determines the panel size. Each panel has a fixed size of two seats, and a list of another length is dropped. Setup also configures `swarm workers`, the default model for every `/swarm` worker unless a race names a model for each arm.
 
 ## Accept the verification offers, or don't
 

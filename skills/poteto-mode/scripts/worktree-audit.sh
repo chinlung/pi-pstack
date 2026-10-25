@@ -11,6 +11,20 @@
 #   origin/HEAD is the remote's default branch, not necessarily the branch PRs
 #   merge into; pass -b when they differ.
 set -u
+set -o pipefail
+
+session_path() {
+	node -e '
+		const path = process.argv[1];
+		const expanded = path === "~" || path.startsWith("~/") ? require("node:os").homedir() + path.slice(1) : path;
+		const local = expanded.startsWith("file://") ? require("node:url").fileURLToPath(expanded) : expanded;
+		process.stdout.write(require("node:path").resolve(local));
+	' "$1" 2>/dev/null || { echo "error: cannot resolve Pi session storage path" >&2; return 1; }
+}
+# Resolve relative configuration before changing to the audited repository.
+agent_dir=$(session_path "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}") || exit 1
+session_dir=""
+if [ -n "${PI_CODING_AGENT_SESSION_DIR:-}" ]; then session_dir=$(session_path "$PI_CODING_AGENT_SESSION_DIR") || exit 1; fi
 
 base=""
 while [ $# -gt 0 ]; do
@@ -46,25 +60,49 @@ origin/*) git fetch origin "+refs/heads/${base#origin/}:refs/remotes/$base" --qu
 	|| echo "warn: could not fetch $base; merged column may be stale" >&2 ;;
 esac
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null 2>&1 || { echo "error: base ref not found: $base" >&2; exit 1; }
+base_ref=$(git rev-parse --symbolic-full-name "$base" 2>/dev/null)
+case "$base_ref" in
+refs/remotes/origin/*) base_branch=${base_ref#refs/remotes/origin/} ;;
+refs/heads/*) base_branch=${base_ref#refs/heads/} ;;
+*) base_branch="" ;;
+esac
 
-# PR state by branch, fetched once as [{number, state, head}] with a lowercase
-# state. Origin when its CLI can read this repo's PRs, otherwise gh. Empty when
-# neither can.
+# Origin supplies no verified SHA here; its PRs can hold a tree, but only
+# ancestry can prove it safe. GitHub merges must match both HEAD and base.
+pr_limit=1000
+normalize_prs() {
+	jq -e --arg source "$1" --argjson limit "$pr_limit" '
+		if type != "array" then error("expected PR array")
+		elif length >= $limit then error("PR listing may be truncated") else
+			map(if $source == "origin" then
+				{number, state: (.status | ascii_downcase), head: .headRef, headSha: null}
+			else
+				{number, state: (.state | ascii_downcase), head: .headRefName, headSha: .headRefOid, base: .baseRefName}
+			end)
+			| if all(.[]; (.head | type == "string" and length > 0)
+				and (.state == "open" or .state == "draft" or .state == "closed" or .state == "merged"))
+			then . else error("invalid PR head or state") end
+		end'
+}
 prs=$(mktemp)
+trap 'rm -f "$prs"' EXIT
 if command -v origin >/dev/null 2>&1 \
-	&& raw=$(origin pr list --author "@me" --state all --limit 1000 \
-		--json number,status,headRef 2>/dev/null); then
-	printf '%s' "$raw" | jq '[.[] | {number, state: .status, head: .headRef}]' > "$prs" 2>/dev/null
-elif raw=$(gh pr list --author "@me" --state all --limit 1000 \
-	--json number,state,headRefName 2>/dev/null); then
-	printf '%s' "$raw" | jq '[.[] | {number, state: (.state | ascii_downcase), head: .headRefName}]' > "$prs" 2>/dev/null
+	&& raw=$(origin pr list --state all --limit "$pr_limit" \
+		--json number,status,headRef 2>/dev/null) \
+	&& printf '%s' "$raw" | normalize_prs origin > "$prs" 2>/dev/null; then
+	:
+elif raw=$(gh pr list --state all --limit "$pr_limit" \
+	--json number,state,headRefName,headRefOid,baseRefName 2>/dev/null) \
+	&& printf '%s' "$raw" | normalize_prs github > "$prs" 2>/dev/null; then
+	:
+else
+	echo "error: could not inspect PR state through Origin or GitHub" >&2
+	exit 1
 fi
-[ -s "$prs" ] || echo "[]" > "$prs"
 
-# Transcripts: Pi keeps one session folder per working directory under
-# ~/.pi/agent/sessions, named for the directory with "/", "\" and ":" turned into "-".
-pi_session_dir() { printf '%s/.pi/agent/sessions/--%s--' "$HOME" "$(printf '%s' "$1" | sed 's#^[/\\]##; s#[/\\:]#-#g')"; }
-transcripts=$(pi_session_dir "$main_wt")
+# Default sessions are cwd-scoped; an explicit store is searched only for this worktree's path.
+pi_session_dir() { printf '%s/sessions/--%s--' "$agent_dir" "$(printf '%s' "$1" | sed 's#^[/\\]##; s#[/\\:]#-#g')"; }
+transcripts=${session_dir:-$(pi_session_dir "$main_wt")}
 now=$(date +%s)
 
 echo "# base: $base"
@@ -78,16 +116,14 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r wt
 	head_ts=$(git -C "$wt" log -1 --format='%ct' HEAD 2>/dev/null || echo 0)
 	age=$([ "$head_ts" -gt 0 ] 2>/dev/null && echo "$(( (now - head_ts) / 86400 ))d" || echo "?")
 
-	# Squash-merged branches are not ancestors of the base, so PR state is the
-	# real signal; merge-base only catches fast-forward/rebase merges.
+	# Squash merges need the PR record; ancestry proves fast-forward merges.
 	git merge-base --is-ancestor "$head" "$base" 2>/dev/null && merged=YES || merged=no
 
-	# Distinguish real WIP (tracked edits) from disposable untracked scratch.
-	porcelain=$(git -C "$wt" status --porcelain 2>/dev/null)
-	if [ -z "$porcelain" ]; then dirty=clean
-	elif printf '%s\n' "$porcelain" | grep -qv '^??'; then
-		dirty="wip:$(printf '%s\n' "$porcelain" | grep -cv '^??')"
-	else dirty="scratch:$(printf '%s\n' "$porcelain" | grep -c '^??')"; fi
+	if ! porcelain=$(git -C "$wt" status --porcelain --untracked-files=all --ignore-submodules=none 2>/dev/null); then dirty=unknown
+	elif [ -z "$porcelain" ]; then dirty=clean
+	elif tracked=$(printf '%s\n' "$porcelain" | grep -cv '^??'); then
+		dirty="wip:$tracked"
+	else dirty="untracked:$(printf '%s\n' "$porcelain" | grep -c '^??')"; fi
 
 	branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
 	if [ -z "$branch" ]; then remote=detached
@@ -97,36 +133,47 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r wt
 			|| remote="ahead$(git -C "$wt" rev-list --count "origin/$branch..HEAD" 2>/dev/null)"
 	else remote=no-remote; fi
 
-	pr=$([ -n "$branch" ] && jq -r --arg b "$branch" \
-		'.[] | select(.head==$b) | "#\(.number)/\(.state)"' "$prs" 2>/dev/null | head -1)
-	[ -z "$pr" ] && pr="-"
+	# Keep one record intact and let any open PR veto cleanup.
+	pr_record=$([ -n "$branch" ] && jq -c --arg b "$branch" \
+		'[.[] | select(.head==$b)] | (map(select(.state=="open" or .state=="draft"))[0] // .[0]) // empty' "$prs" 2>/dev/null)
+	pr=$(jq -r '"#\(.number)/\(.state)"' <<< "$pr_record")
+	[ -n "$pr" ] || pr="-"
+	pr_head=$(jq -r '.headSha // empty' <<< "$pr_record")
+	pr_base=$(jq -r '.base // empty' <<< "$pr_record")
 
-	# Most recent chat whose transcript operated in this worktree. Match path
-	# followed by "/" or a quote so glint-482 does not match glint-482-r37.
+	# Match a path boundary so glint-482 does not match glint-482-r37.
 	last="-"; last_ts=0
-	# A chat that ran in the worktree has its own session folder. A chat that ran in the
-	# main checkout counts when it names the worktree's path. Sibling folders hold
-	# unrelated projects' private chats and are never read.
-	wt_sessions=$(pi_session_dir "$wt")
+	wt_sessions=""
+	if [ -z "$session_dir" ]; then wt_sessions=$(pi_session_dir "$wt"); fi
 	if [ -d "$transcripts" ] || [ -d "$wt_sessions" ]; then
-		f=$( { if [ -d "$transcripts" ]; then rg -l -0 -e "${wt}/" -e "${wt}\"" "$transcripts" 2>/dev/null; fi
-			if [ -d "$wt_sessions" ]; then find "$wt_sessions" -name '*.jsonl' -type f -print0 2>/dev/null; fi; } \
-			| xargs -0 stat -f '%m %N' 2>/dev/null | sort -rn | head -1)
-		if [ -n "$f" ]; then last_ts=$(echo "$f" | awk '{print $1}')
-			last=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null); fi
+		json_wt=$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]).slice(1, -1))' "$wt") || {
+			echo "error: could not encode worktree path for session search" >&2
+			exit 1
+		}
+		if ! f=$( { if [ -d "$transcripts" ]; then
+				rg --hidden --no-ignore -F -l -0 -e "${wt}/" -e "${wt}\"" -e "${json_wt}/" -e "${json_wt}\"" "$transcripts" 2>/dev/null || [ "$?" -eq 1 ] || exit 1
+			fi
+			if [ -d "$wt_sessions" ]; then find "$wt_sessions" -name '*.jsonl' -type f -print0 2>/dev/null || exit 1; fi; } \
+			| while IFS= read -r -d '' transcript; do
+				mtime=$(stat -f '%m' "$transcript" 2>/dev/null) || mtime=$(stat -c '%Y' "$transcript" 2>/dev/null) || exit 1
+				printf '%s\n' "$mtime"
+			done | sort -rn | sed -n '1p'); then
+			echo "error: could not inspect sessions for $wt" >&2
+			exit 1
+		fi
+		if [ -n "$f" ]; then last_ts="$f"
+			last=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null) || last=$(date -d "@$last_ts" '+%Y-%m-%d' 2>/dev/null); fi
 	fi
 	recent=$([ "$last_ts" -gt 0 ] 2>/dev/null && [ $(( (now - last_ts) / 86400 )) -le 4 ] && echo yes || echo no)
 
-	case "$dirty" in wip:*) bucket=hold-wip ;; *)
+	case "$dirty" in unknown) bucket=hold-unknown ;; wip:*) bucket=hold-wip ;; untracked:*) bucket=hold-untracked ;; *)
 		case "$pr" in */open|*/draft) bucket=hold-open-pr ;; *)
 			if [ "$recent" = yes ]; then bucket=verify-recent-chat
-			elif [ "$merged" = YES ] || [ "$pr" != "-" ]; then bucket=safe
+			elif [ "$merged" = YES ] || { [ -n "$head" ] && [ -n "$base_branch" ] && [ "${pr##*/}" = merged ] && [ "$pr_head" = "$head" ] && [ "$pr_base" = "$base_branch" ]; }; then bucket=safe
 			else bucket=review; fi ;;
 		esac ;;
 	esac
 
 	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
 		"$size" "$age" "$merged" "$dirty" "$remote" "$pr" "$last" "$bucket" "$wt"
-done | sort -t$'\t' -k1,1 -rh
-
-rm -f "$prs"
+done | sort -t$'\t' -k1,1 -rh || exit

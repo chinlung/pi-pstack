@@ -17,9 +17,10 @@
  *   node scripts/port-skills.mjs --check    # fail if skills/ is out of date
  */
 import { chmodSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, extname, join, posix, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { danglingLinks, relinkUnshipped } from "./port-links.mjs";
+import metadata from "../package.json" with { type: "json" };
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UPSTREAM = join(ROOT, "upstream");
@@ -175,8 +176,8 @@ const REPLACEMENTS = [
 ];
 
 /**
- * Per-file replacements, applied after the global table. A file-specific rule wins over the
- * global table for text the global table cannot express.
+ * Per-file replacements run before and after the global table. Keep each rule non-self-matching
+ * so the second pass cannot duplicate content produced by the first.
  */
 const FILE_RULES = [
 	{
@@ -199,30 +200,18 @@ const FILE_RULES = [
 	{
 		match: "skills/poteto-mode/playbooks/multi-phase-plan.md",
 		rules: [
+			["node pstack/skills/poteto-mode/scripts/check-plan.mjs <plan.md>", 'node "<pstack>/skills/poteto-mode/scripts/check-plan.mjs" "<plan.md>"'],
+			["Re-read the execution playbook from trunk.", "Re-read the execution playbook from the installed pstack package."],
 			["`../references/bugbot-triage.md`", "`<pstack>/skills/poteto-mode/references/bugbot-triage.md`"],
 			[/`playbooks\/shipping\.md`/g, "`<pstack>/skills/poteto-mode/playbooks/shipping.md`"],
 		],
 	},
-	// The rules below run against upstream's own text, before the global table.
 	{
-		match: "skills/poteto-mode/scripts/worktree-audit.sh",
+		match: "skills/poteto-mode/playbooks/worktree-cleanup.md",
 		rules: [
-			[
-				"# Transcripts dir: ~/.cursor/projects/<slugified-repo-path>/agent-transcripts.\nslug=$(printf '%s' \"$main_wt\" | sed 's#^/##; s#/#-#g')\ntranscripts=\"$HOME/.cursor/projects/$slug/agent-transcripts\"",
-				() =>
-					"# Transcripts: Pi keeps one session folder per working directory under\n# ~/.pi/agent/sessions, named for the directory with \"/\", \"\\\" and \":\" turned into \"-\".\npi_session_dir() { printf '%s/.pi/agent/sessions/--%s--' \"$HOME\" \"$(printf '%s' \"$1\" | sed 's#^[/\\\\]##; s#[/\\\\:]#-#g')\"; }\ntranscripts=$(pi_session_dir \"$main_wt\")",
-			],
-			[
-				"\tif [ -d \"$transcripts\" ]; then\n\t\tf=$(rg -l -e \"${wt}/\" -e \"${wt}\\\"\" \"$transcripts\" 2>/dev/null \\",
-				() =>
-					"\t# A chat that ran in the worktree has its own session folder. A chat that ran in the\n\t# main checkout counts when it names the worktree's path. Sibling folders hold\n\t# unrelated projects' private chats and are never read.\n\twt_sessions=$(pi_session_dir \"$wt\")\n\tif [ -d \"$transcripts\" ] || [ -d \"$wt_sessions\" ]; then\n\t\tf=$( { if [ -d \"$transcripts\" ]; then rg -l -0 -e \"${wt}/\" -e \"${wt}\\\"\" \"$transcripts\" 2>/dev/null; fi\n\t\t\tif [ -d \"$wt_sessions\" ]; then find \"$wt_sessions\" -name '*.jsonl' -type f -print0 2>/dev/null; fi; } \\",
-			],
-			// A path with a space must survive whole: a truncated worktree path maps to another
-			// project's session folder. Paths are cut after "worktree " and file names are
-			// NUL-delimited.
-			["\t\t\t| xargs stat -f '%m %N'", () => "\t\t\t| xargs -0 stat -f '%m %N'"],
-			["main_wt=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')", () => "main_wt=$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)"],
-			["git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do", () => "git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r wt; do"],
+			["`scratch:N` is untracked throwaway, safe to drop, but name the files.", "`untracked:N` may be source work Git cannot recover. Inspect untracked and ignored files and get explicit approval before deleting anything that is not confirmed disposable."],
+			["`wip` and in-use pause.", "`wip`, untracked files, and in-use worktrees pause. An unreadable Git status is `unknown`; hold that worktree until Git can inspect it."],
+			["5. Prune the confirmed set.", "5. Prune only the confirmed disposable set."],
 		],
 	},
 	{
@@ -359,11 +348,6 @@ const FILE_RULES = [
 		],
 	},
 	{
-		match: "skills/poteto-mode/playbooks/orchestrate.md",
-		rules: [
-		],
-	},
-	{
 		match: "skills/swarm/SKILL.md",
 		rules: [
 			[
@@ -463,11 +447,6 @@ const FILE_RULES = [
 		],
 	},
 	{
-		match: "skills/maintain-verification-skill/SKILL.md",
-		rules: [
-		],
-	},
-	{
 		match: "skills/reflect/SKILL.md",
 		rules: [[/agent mode \(agent mode\)/g, "agent mode"]],
 	},
@@ -539,7 +518,7 @@ const FILE_RULES = [
 			],
 			["Then setup offers once", "Then the skill offers once"],
 			["After setup, start a new chat. The model rule applies to new sessions.", "The role map applies to every subagent launched after it is written, so no new chat is needed."],
-			["so the list length sets the panel size.", "so the list length sets the panel size. Each panel has a fixed size of two seats, and a list of another length is dropped."],
+			["so the list length sets the panel size.", "so list length determines the panel size. Each panel has a fixed size of two seats, and a list of another length is dropped."],
 			["- Shorten a panel list. Each entry runs one subagent.\n", ""],
 		],
 	},
@@ -561,8 +540,8 @@ const FILE_RULES = [
 				"- When agents need shared context, put the notes or transcript paths in each brief. Pi sessions do not share context on their own.",
 			],
 			["One prompt can carry a whole Project, from", "One prompt can carry a whole body of work, from"],
-			["pstack ships this as a dormant", "Upstream pstack ships this as a dormant"],
-			["and name the target repository to set it up.", "and name the target repository to set it up. It needs Cursor Automations, which Pi does not have, so skip it in Pi."],
+			["pstack ships this as a dormant", "Upstream pstack provides this dormant"],
+			["and name the target repository to set it up.", "and name the target repository for setup. It needs Cursor Automations, which Pi does not have, so skip it in Pi."],
 		],
 	},
 ];
@@ -787,6 +766,7 @@ function render() {
 
 /** The roots the port regenerates. Their old contents are deleted, so only `rendered` counts. */
 const GENERATED_ROOTS = ["agents/", "docs/guide/", "skills/"];
+const PACKAGE_FILES = ["package.json", ...metadata.files];
 
 /**
  * True when a link target is a file this package ships: a rendered file, or a hand-written file
@@ -799,6 +779,8 @@ function ships(target, rendered) {
 	const dir = target.endsWith("/") ? target : `${target}/`;
 	for (const key of rendered.keys()) if (key.startsWith(dir)) return true;
 	if (target.startsWith("..") || GENERATED_ROOTS.some((root) => target.startsWith(root))) return false;
+	if (target.split("/").some((part) => part === "node_modules" || part === ".git")) return false;
+	if (target !== "." && !PACKAGE_FILES.some((path) => target === path || target.startsWith(`${path}/`))) return false;
 	return existsSync(join(ROOT, target));
 }
 

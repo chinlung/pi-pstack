@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -58,11 +58,39 @@ test("the plan template keeps package references valid after copying to a projec
 	}
 });
 
+test("the documented checker command validates a copied plan with spaces in both paths", () => {
+	const temporary = mkdtempSync(join(tmpdir(), "pstack-plan-paths-"));
+	try {
+		const installed = join(temporary, "installed package");
+		symlinkSync(ROOT, installed, "dir");
+		const text = read("skills/poteto-mode/playbooks/multi-phase-plan.md");
+		const template = text.split("````markdown\n")[1].split("````")[0];
+		const plan = join(temporary, "release plan.md");
+		writeFileSync(plan, template.replaceAll("<pstack>", installed).replace("<swarm workers model>", "provider/model:high"));
+		const command = text.match(/`(node [^`]+check-plan\.mjs[^`]+)`/)[1]
+			.replace("<pstack>", installed).replace("<plan.md>", plan);
+		const result = spawnSync("bash", ["-c", command], { cwd: temporary, encoding: "utf8" });
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /1 PR sections, 0 problems/);
+	} finally {
+		rmSync(temporary, { recursive: true, force: true });
+	}
+});
+
 test("ketchup uses available rendering tools rather than an undeclared visualize command", () => {
 	const text = read("skills/ketchup/SKILL.md");
 	assert.doesNotMatch(text, /\/visualize\b/);
 	assert.match(text, /available in this session/);
 	assert.match(text, /plain text/);
+});
+
+test("the port adds each guide annotation only once across both replacement passes", () => {
+	const setup = read("docs/guide/01-setup.md");
+	assert.equal(setup.split("Each panel has a fixed size of two seats").length - 1, 1);
+	const overnight = read("docs/guide/07-overnight.md");
+	assert.equal(overnight.split("Upstream pstack provides this dormant").length - 1, 1);
+	assert.doesNotMatch(overnight, /Upstream Upstream/);
+	assert.equal(overnight.split("It needs Cursor Automations, which Pi does not have").length - 1, 1);
 });
 
 test("the README and adapter name the shipped plan checker", () => {
