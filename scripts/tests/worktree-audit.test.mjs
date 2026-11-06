@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -205,7 +205,9 @@ function recordRecentActivity(f, cwd = f.repo) {
 	const configured = f.env.PI_CODING_AGENT_SESSION_DIR || join(f.env.PI_CODING_AGENT_DIR || join(f.root, ".pi", "agent"), "sessions", `--${slug}--`);
 	const sessions = resolve(f.root, configured.replace(/^~(?=\/|$)/, f.env.HOME));
 	mkdirSync(sessions, { recursive: true });
-	writeFileSync(join(sessions, "current.jsonl"), JSON.stringify({ cwd: f.worktree }) + "\n");
+	const transcript = join(sessions, "current.jsonl");
+	writeFileSync(transcript, JSON.stringify({ cwd: f.worktree }) + "\n");
+	return transcript;
 }
 
 test("recent activity is detected when a worktree path contains regex metacharacters", (t) => {
@@ -404,4 +406,34 @@ else process.exit(1);
 	const result = f.run();
 	assert.match(result.lastChat, /^\d{4}-\d{2}-\d{2}$/);
 	assert.equal(result.bucket, "verify-recent-chat");
+});
+
+test("recent activity is read with GNU stat and date, where `stat -f` is file system status", (t) => {
+	const f = fixture(t);
+	f.env.AUDIT_MERGED = "yes";
+	// GNU stat accepts `-c`, and treats `-f` as file system status: it exits 0 and prints text
+	// that is not a timestamp. GNU date reads `-r` as a file name and takes a timestamp from `-d @N`.
+	writeFileSync(join(f.bin, "stat"), `#!/usr/bin/env node
+import { statSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "-c") { console.log(Math.floor(statSync(args.at(-1)).mtimeMs / 1000)); process.exit(0); }
+if (args[0] === "-f") { console.log("  File: \\"" + args.at(-1) + "\\"\\n    ID: 0 Namelen: 255 Type: ext2/ext3"); process.exit(0); }
+process.exit(1);
+`, { mode: 0o755 });
+	writeFileSync(join(f.bin, "date"), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "+%s") { console.log(Math.floor(Date.now() / 1000)); process.exit(0); }
+if (args[0] === "-d" && args[1].startsWith("@")) { console.log(new Date(Number(args[1].slice(1)) * 1000).toISOString().slice(0, 10)); process.exit(0); }
+console.error("date: invalid date or missing file: " + args.join(" ")); process.exit(1);
+`, { mode: 0o755 });
+	const transcript = recordRecentActivity(f);
+	const recent = f.run();
+	assert.equal(recent.bucket, "verify-recent-chat");
+	assert.equal(recent.lastChat, new Date().toISOString().slice(0, 10));
+	// An old transcript must not count as recent, so the bucket depends on the mtime read above.
+	const old = new Date(Date.UTC(2020, 0, 15));
+	utimesSync(transcript, old, old);
+	const stale = f.run();
+	assert.equal(stale.lastChat, "2020-01-15");
+	assert.notEqual(stale.bucket, "verify-recent-chat");
 });
