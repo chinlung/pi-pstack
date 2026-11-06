@@ -22,7 +22,8 @@ node --experimental-strip-types --test extension/tests/roles.test.ts
 node --experimental-strip-types --test --test-name-pattern='GNU stat' scripts/tests/worktree-audit.test.mjs
 ```
 
-- `typecheck`／`test` 依賴 `scripts/link-host-packages.mjs` 把 Pi 提供的 `@earendil-works/pi-coding-agent`、`typebox`、`pi-subagents` 連進 `node_modules`（來源是本機安裝的 Pi，`~/.pi/agent/install/current-version` 優先於 `PI_VERSION`）。沒裝 Pi 就無法跑 extension 測試。
+- `typecheck`／`test` 依賴 `scripts/link-host-packages.mjs` 把 Pi 提供的 `@earendil-works/pi-coding-agent`、`typebox`、`pi-subagents` 連進 `node_modules`（來源是本機安裝的 Pi，`~/.pi/agent/install/current-version` 優先於 `PI_VERSION`）。沒裝 Pi 時，把 `PI_CODING_AGENT_DIR` 指向一個從 npm 組出同樣結構的目錄，做法見 `.github/workflows/ci.yml`。
+- CI（`.github/workflows/ci.yml`）在 push 到 main 與每個 PR 跑 `npm run check`。host 套件從 `ci/` 的 lockfile root 以 `npm ci` 安裝：`ci/pi-release/` 是 Pi installer 自己的 lockfile root（`~/.pi/agent/install/releases/<版本>/` 的 `package.json` 與 `package-lock.json` 原樣複製），`ci/pi-agent-npm/` 鎖 `pi-subagents`。升級 Pi 後重新複製這兩份。
 - `scripts/tests/worktree-audit.test.mjs` 需要 `bash`、`jq`、`rg`。在 Claude Code 沙箱內 `mktemp` 會寫 `/var/folders` 被擋而讓整檔誤失敗，要在沙箱外跑。
 
 ## 架構：誰是原始碼，誰是產物
