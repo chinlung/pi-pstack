@@ -427,7 +427,10 @@ const FILE_RULES = [
 	},
 	{
 		match: "skills/reflect/SKILL.md",
-		rules: [[/agent mode \(agent mode\)/g, "agent mode"]],
+		rules: [
+			[/agent mode \(agent mode\)/g, "agent mode"],
+			["Never edit a skill under `plugins/cache/`.", "Never edit a skill in the installed pi-pstack package (`<pstack>/skills/`)."],
+		],
 	},
 	{
 		match: "skills/poteto-mode/playbooks/orchestrate.md",
@@ -817,6 +820,7 @@ const FORBIDDEN = [
 	{ pattern: /\btodolist\b/i, label: "todolist", except: [] },
 	{ pattern: /pstack-models\.mdc/, label: "pstack-models.mdc", except: [] },
 	{ pattern: /\.cursor\//, label: ".cursor/", except: [] },
+	{ pattern: /plugins\/cache/, label: "plugins/cache", except: [] },
 	{ pattern: /run_in_background/, label: "run_in_background", except: [] },
 	{ pattern: /cloud_base_branch/, label: "cloud_base_branch", except: [] },
 	{ pattern: /environment: "(cloud|local)"/, label: 'environment: "cloud"', except: [] },
