@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The worktree-audit tests run the real Bash script, which needs jq and ripgrep.
+      - name: Install jq and ripgrep
+        run: sudo apt-get update && sudo apt-get install -y jq ripgrep
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The extension's typecheck and tests import packages that Pi supplies at runtime.
+      # scripts/link-host-packages.mjs links them from a Pi agent directory, so CI builds one
+      # with the same layout. ci/pi-release is the Pi installer's own lockfile root for the
+      # supported release, copied verbatim, so CI resolves the same dependency tree users run.
+      - name: Build the Pi agent directory
+        run: |
+          PI_CODING_AGENT_DIR="$RUNNER_TEMP/pi-agent"
+          echo "PI_CODING_AGENT_DIR=$PI_CODING_AGENT_DIR" >> "$GITHUB_ENV"
+          version=$(node -p "require('./ci/pi-release/package.json').version")
+          release="$PI_CODING_AGENT_DIR/install/releases/$version"
+          mkdir -p "$release" "$PI_CODING_AGENT_DIR/npm"
+          printf '%s\n' "$version" > "$PI_CODING_AGENT_DIR/install/current-version"
+          cp ci/pi-release/package.json ci/pi-release/package-lock.json "$release/"
+          cp ci/pi-agent-npm/package.json ci/pi-agent-npm/package-lock.json "$PI_CODING_AGENT_DIR/npm/"
+          npm ci --prefix "$release" --no-audit --no-fund
+          npm ci --prefix "$PI_CODING_AGENT_DIR/npm" --no-audit --no-fund
+
+      - name: Typecheck, test, and check generated skills
+        run: npm run check

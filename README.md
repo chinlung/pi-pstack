@@ -129,7 +129,7 @@ npm run port:skills  # 重新產生 skills/、agents/、docs/guide/
 npm run check:skills # 確認生成產物是最新的
 ```
 
-`typecheck` 與 `test` 會先跑 `scripts/link-host-packages.mjs`，把 Pi 提供給 extension 的套件（`@earendil-works/pi-coding-agent`、`typebox`）依 `~/.pi/agent/install/current-version` 選擇 release（該檔不存在時才回退到 `PI_VERSION`），連進 `node_modules`；另連入 `~/.pi/agent/npm` 下安裝的 `pi-subagents`，讓測試用它真正的 runtime agent registry 驗證兩個 agent 的定義。這些套件由 Pi 在執行時提供，不能列為 dependency；`npm install` 會清掉這些連結，所以每次都重建。
+`typecheck` 與 `test` 會先跑 `scripts/link-host-packages.mjs`，把 Pi 提供給 extension 的套件（`@earendil-works/pi-coding-agent`、`typebox`）依 `~/.pi/agent/install/current-version` 選擇 release（該檔不存在時才回退到 `PI_VERSION`），連進 `node_modules`；另連入 `~/.pi/agent/npm` 下安裝的 `pi-subagents`，讓測試用它真正的 runtime agent registry 驗證兩個 agent 的定義。這些套件由 Pi 在執行時提供，不能列為 dependency；`npm install` 會清掉這些連結，所以每次都重建。沒有安裝 Pi 的環境（例如 CI）可以設 `PI_CODING_AGENT_DIR`，指向一個從 npm 組出同樣目錄結構的資料夾；`.github/workflows/ci.yml` 就是這樣做，並在每次 push 到 main 與每個 PR 跑 `npm run check`。
 
 worktree 稽核的回歸測試會執行 Bash 腳本，需在 `PATH` 中提供 `bash`、`jq` 與 `rg`（ripgrep）；Git 與 forge 回應使用受控測試輸入，不會操作真實倉庫或連線。
 

@@ -1,0 +1,8 @@
+{
+	"name": "pi-pstack-ci-agent-packages",
+	"private": true,
+	"description": "Lockfile root for the Pi packages CI installs under the agent directory's npm folder.",
+	"dependencies": {
+		"pi-subagents": "0.86.0"
+	}
+}
