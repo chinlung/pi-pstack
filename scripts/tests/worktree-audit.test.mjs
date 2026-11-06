@@ -405,3 +405,26 @@ else process.exit(1);
 	assert.match(result.lastChat, /^\d{4}-\d{2}-\d{2}$/);
 	assert.equal(result.bucket, "verify-recent-chat");
 });
+
+test("recent activity is read with GNU stat and date, where `stat -f` is file system status", (t) => {
+	const f = fixture(t);
+	f.env.AUDIT_MERGED = "yes";
+	// GNU stat accepts `-c`, and treats `-f` as file system status: it exits 0 and prints text
+	// that is not a timestamp. GNU date reads `-r` as a file name and takes a timestamp from `-d @N`.
+	writeFileSync(join(f.bin, "stat"), `#!/usr/bin/env node
+import { statSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "-c") { console.log(Math.floor(statSync(args.at(-1)).mtimeMs / 1000)); process.exit(0); }
+if (args[0] === "-f") { console.log("  File: \\"" + args.at(-1) + "\\"\\n    ID: 0 Namelen: 255 Type: ext2/ext3"); process.exit(0); }
+process.exit(1);
+`, { mode: 0o755 });
+	writeFileSync(join(f.bin, "date"), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "-d" && args[1].startsWith("@")) { console.log(new Date(Number(args[1].slice(1)) * 1000).toISOString().slice(0, 10)); process.exit(0); }
+console.error("date: invalid date or missing file: " + args.join(" ")); process.exit(1);
+`, { mode: 0o755 });
+	recordRecentActivity(f);
+	const row = f.run();
+	assert.equal(row.bucket, "verify-recent-chat");
+	assert.match(row.lastChat, /^\d{4}-\d{2}-\d{2}$/);
+});

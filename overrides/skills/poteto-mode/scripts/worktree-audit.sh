@@ -13,6 +13,15 @@
 set -u
 set -o pipefail
 
+# GNU coreutils (Linux, nix, Homebrew gnubin) reads `stat -f` as file system status,
+# which succeeds with unrelated output, and `date -r` as a file. Pick the flags once
+# instead of trying BSD first and falling back on failure.
+if stat -c %Y / >/dev/null 2>&1; then
+	file_mtime() { stat -c '%Y' "$1"; }; fmt_day() { date -d "@$1" '+%Y-%m-%d'; }
+else
+	file_mtime() { stat -f '%m' "$1"; }; fmt_day() { date -r "$1" '+%Y-%m-%d'; }
+fi
+
 session_path() {
 	node -e '
 		const path = process.argv[1];
@@ -155,14 +164,14 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r wt
 			fi
 			if [ -d "$wt_sessions" ]; then find "$wt_sessions" -name '*.jsonl' -type f -print0 2>/dev/null || exit 1; fi; } \
 			| while IFS= read -r -d '' transcript; do
-				mtime=$(stat -f '%m' "$transcript" 2>/dev/null) || mtime=$(stat -c '%Y' "$transcript" 2>/dev/null) || exit 1
+				mtime=$(file_mtime "$transcript" 2>/dev/null) || exit 1
 				printf '%s\n' "$mtime"
 			done | sort -rn | sed -n '1p'); then
 			echo "error: could not inspect sessions for $wt" >&2
 			exit 1
 		fi
 		if [ -n "$f" ]; then last_ts="$f"
-			last=$(date -r "$last_ts" '+%Y-%m-%d' 2>/dev/null) || last=$(date -d "@$last_ts" '+%Y-%m-%d' 2>/dev/null); fi
+			last=$(fmt_day "$last_ts" 2>/dev/null); fi
 	fi
 	recent=$([ "$last_ts" -gt 0 ] 2>/dev/null && [ $(( (now - last_ts) / 86400 )) -le 4 ] && echo yes || echo no)
 

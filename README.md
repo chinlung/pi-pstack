@@ -25,7 +25,7 @@ pi -e .
 - `/pstack-models` — 檢視目前的角色對應表。
 - `pstack_models` tool — 給模型用的唯讀版本。slash command 只有使用者能打，模型要查某個角色該用哪個模型，靠的是這個 tool。
 - `poteto-agent` 與 `comment-sicko` 兩個 subagent。
-- 56 個 skill（含 24 個 `principle-*`），用 `/skill:<name>` 呼叫。extension 另為其中 30 個非 `principle-*` 的 skill 註冊同名的短指令（`/how`、`/tdd` 等，等同 `/skill:<name>`），所以上游指南裡的範例照打即可；`principle-*` 仍要用 `/skill:principle-<name>`。其中 55 個設了 `disable-model-invocation: true`，Pi 不會把它們列進模型的 skill 清單，只能由使用者用 `/skill:<name>` 叫出，或由正在讀的 skill 依路徑讀取。
+- 58 個 skill（含 24 個 `principle-*`），用 `/skill:<name>` 呼叫。extension 另為其中 32 個非 `principle-*` 的 skill 註冊同名的短指令（`/how`、`/tdd` 等，等同 `/skill:<name>`），所以上游指南裡的範例照打即可；`principle-*` 仍要用 `/skill:principle-<name>`。其中 57 個設了 `disable-model-invocation: true`，Pi 不會把它們列進模型的 skill 清單，只能由使用者用 `/skill:<name>` 叫出，或由正在讀的 skill 依路徑讀取。
 
 ## 快速開始
 
@@ -109,11 +109,11 @@ pi -e . --mode rpc
 
 ```text
 extension/          Pi extension：runtime agent 註冊、指令、pstack_models tool、模型解析
-skills/             56 個 skill（生成產物）
+skills/             58 個 skill（生成產物）
 agents/             poteto-agent 與 comment-sicko 的 prompt（生成產物，由 extension 讀取後註冊）
 docs/guide/         pstack 指南（生成產物）
 docs/harness/pi.md  Cursor → Pi 名稱對照表
-upstream/           上游 pstack 0.15.29 原始碼
+upstream/           上游 pstack 0.15.36 原始碼（cursor/plugins@2776ddd）
 overrides/          機械式移植做不到、改以手寫的檔案
 scripts/            移植與檢查腳本
 ```

@@ -49,8 +49,6 @@ const REPLACEMENTS = [
 	// The subagent tool. Cursor's Task tool is Pi's subagent tool.
 	[/`Task` call/g, "`subagent` call"],
 	[/\bTask spawn\b/g, "subagent spawn"],
-	[/with the Task tool/g, "with the `subagent` tool"],
-	[/only through the Task tool/g, "only through the `subagent` tool"],
 	[/If the Task tool rejects/g, "If the `subagent` tool rejects"],
 	[/omit Task `model`/g, "omit the `model` field"],
 	[
@@ -113,10 +111,6 @@ const REPLACEMENTS = [
 		"find this conversation's transcript in Pi's session directory under `~/.pi/agent/sessions/`. Read only the current session's file. That reads private chats from unrelated projects otherwise.",
 	],
 	[
-		/Reading local transcripts under `agent-transcripts\/`\./g,
-		"Reading the current session's local transcript.",
-	],
-	[
 		/<agent-transcripts>/g,
 		"<session-dir>",
 	],
@@ -155,10 +149,6 @@ const REPLACEMENTS = [
 		"Run `unslop` over the diff before commit",
 	],
 	[
-		/`control-ui` or `control-cli` runtime verification \(from `cursor-team-kit`\)/g,
-		"runtime verification with the project's own driver script",
-	],
-	[
 		/the `deslop` skill from the `cursor-team-kit` plugin \(`\/deslop`\)/g,
 		"the `unslop` skill",
 	],
@@ -190,9 +180,9 @@ const FILE_RULES = [
 	...[
 		["skills/poteto-mode/playbooks/babysit.md", /(?<!\/)scripts\/watch-pr\/watch-pr/g, 'bun "<pstack>/skills/poteto-mode/scripts/watch-pr/watch-pr"'],
 		["skills/poteto-mode/playbooks/shipping.md", /(?<!\/)scripts\/watch-pr\/watch-pr/g, 'bun "<pstack>/skills/poteto-mode/scripts/watch-pr/watch-pr"'],
-		["skills/poteto-mode/playbooks/orchestrate.md", /(?<!\/)scripts\/orch\/orch\.ts/g, '"<pstack>/skills/poteto-mode/scripts/orch/orch.ts"'],
 		["skills/poteto-mode/playbooks/worktree-cleanup.md", /(?<!\/)scripts\/worktree-audit\.sh/g, 'bash "<pstack>/skills/poteto-mode/scripts/worktree-audit.sh"'],
 		["skills/show-me-your-work/SKILL.md", /(?<!\/)scripts\/log\.sh/g, 'bash "<pstack>/skills/show-me-your-work/scripts/log.sh"'],
+		["skills/statechart/SKILL.md", /<skill dir>\/scripts\/statechart/g, '"<pstack>/skills/statechart/scripts/statechart"'],
 	].map(([match, source, target]) => ({
 		match,
 		rules: [[source, target]],
@@ -217,17 +207,6 @@ const FILE_RULES = [
 	{
 		match: "skills/poteto-mode/playbooks/autonomous-run.md",
 		rules: [["using Cursor's `/loop` command (a built-in, not a pstack skill)", "using a polling watcher, a subagent that polls the condition and reports when it holds"]],
-	},
-	{
-		match: "skills/poteto-mode/playbooks/orchestrate.md",
-		rules: [
-			["the cloud agent's status in the Cursor dashboard", "the run's status from `subagent({ action: \"status\", id })`"],
-			["After a Cursor restart: local agents are dead, cloud work is not.", "After a Pi restart: foreground subagents are gone, async background runs keep going."],
-			[
-				"(nesting works to depth 3, and a nested spawn has the full Task schema including `environment`)",
-				"(nesting stops at pi-subagents' depth limit, 2 by default, so workers spawned by a sub-coordinator the main session spawned cannot spawn again; a nested spawn has the full `subagent` schema including `cwd` and `worktree`)",
-			],
-		],
 	},
 	{
 		match: "skills/poteto-mode/SKILL.md",
@@ -360,8 +339,8 @@ const FILE_RULES = [
 		match: "skills/interrogate/SKILL.md",
 		rules: [
 			[
-				/Each reviewer gets `agent: "delegate"`, read-only, and `model` set to its configured entry/g,
-				'Each reviewer gets `agent: "reviewer"`, whose tools are read-only, and `model` set to its configured entry',
+				"Spawn each adversary as `generalPurpose`.",
+				'Spawn each adversary with `agent: "delegate"`, because it runs repros and edits files in its own worktree.',
 			],
 		],
 	},
@@ -453,11 +432,15 @@ const FILE_RULES = [
 	{
 		match: "skills/poteto-mode/playbooks/orchestrate.md",
 		rules: [
+			["Spawn workers with `Task`.", "Spawn workers with the `subagent` tool."],
 			[
-				" in the current agent's store (path in the system prompt).",
-				" under `.pi/pstack/` in the working directory and keep it out of git. Pi has no agent store, so export `ORCH_STORE` as that directory's absolute path before any `orch` command.",
+				/Run workers on a new cloud VM \(`environment: "cloud"`\) unless the work needs this machine: [^.]*?, or auth that exists only here\./g,
+				"Run each worker in its own git worktree (`worktree: true`). Pi children run on this machine, so a simulator, local transcripts, and auth that exists only here stay reachable.",
 			],
-			["Run `orch init`.", "Export `ORCH_STORE`, then run `orch init`."],
+			[
+				"and the Project store.",
+				"and the Project store, a directory under `.pi/pstack/` in the working directory that stays out of git.",
+			],
 		],
 	},
 	{
@@ -497,10 +480,6 @@ const FILE_RULES = [
 	{
 		match: "skills/how/references/explainer-prompt.md",
 		rules: [["Use Read, Grep, and Glob as needed.", "Use `read`, `grep`, and `find` as needed."]],
-	},
-	{
-		match: "skills/interrogate/references/rubric.md",
-		rules: [["(Read, Grep, Glob)", "(`read`, `grep`, `find`)"]],
 	},
 	...["judgment", "tooling", "divergent"].map((name) => ({
 		match: `skills/reflect/references/${name}-reviewer.md`,
@@ -596,24 +575,12 @@ const MODEL_DEFAULTS = [
 		"| `reflect tooling` | the role map's entry |",
 	],
 	[
-		/\| Reviewer A \| `claude-opus-5-5-xhigh` \|/g,
-		"| Reviewer A | the role map's entry |",
+		/Families go by prefix: `claude-\*`, and `grok-\*` with `cursor-grok-\*` and `composer-\*`\. A refused `composer-\*` entry runs on `grok-4\.7-xhigh-fast`\. If the family has no default, or the Task tool rejects that default,/g,
+		"A family is the model's vendor lineage (`claude`, `gpt`, `gemini`, …), not its provider, as the Pi adapter defines it, so one model reached through two providers is one family. A rejected entry runs on the same role's other entry. If that entry is rejected too,",
 	],
 	[
-		/\| Reviewer B \| `grok-4\.7-xhigh-fast` \|/g,
-		"| Reviewer B | the role map's entry |",
-	],
-	[
-		/Families go by prefix: `claude-\*`, and `grok-\*` with `cursor-grok-\*` and `composer-\*`\. A refused `composer-\*` entry runs on `grok-4\.7-xhigh-fast`\. With no family match, use `claude-opus-5-5-xhigh`\./g,
-		"A family is the model's vendor lineage (`claude`, `gpt`, `gemini`, …), not its provider, as the Pi adapter defines it, so one model reached through two providers is one family. A rejected entry runs on the same role's other entry. With no family match, use the role map's first entry.",
-	],
-	[
-		/A refused `composer-\*` entry runs on Reviewer B's default\. With no family match, use Reviewer A's default\./g,
-		"A rejected entry runs on the same role's other entry. With no family match, use the role map's first entry.",
-	],
-	[
-		/Families go by prefix: `claude-\*`, and `grok-\*` with `cursor-grok-\*` and `composer-\*`\./g,
-		"A family is the model's vendor lineage (`claude`, `gpt`, `gemini`, …), not its provider, as the Pi adapter defines it, so one model reached through two providers is one family.",
+		/With the default pool, a Claude parent gets `grok-4\.7-xhigh-fast`\. A parent from any other family gets `claude-opus-5-5-xhigh` first\./g,
+		"With the default pool, the judge is the first pool entry from a family other than the parent's.",
 	],
 ];
 

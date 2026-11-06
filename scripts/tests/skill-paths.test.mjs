@@ -11,9 +11,9 @@ const read = (file) => readFileSync(join(ROOT, file), "utf8");
 const commands = [
 	["skills/poteto-mode/playbooks/babysit.md", 'bun "<pstack>/skills/poteto-mode/scripts/watch-pr/watch-pr"'],
 	["skills/poteto-mode/playbooks/shipping.md", 'bun "<pstack>/skills/poteto-mode/scripts/watch-pr/watch-pr"'],
-	["skills/poteto-mode/playbooks/orchestrate.md", 'bun "<pstack>/skills/poteto-mode/scripts/orch/orch.ts"'],
 	["skills/poteto-mode/playbooks/worktree-cleanup.md", 'bash "<pstack>/skills/poteto-mode/scripts/worktree-audit.sh"'],
 	["skills/show-me-your-work/SKILL.md", 'bash "<pstack>/skills/show-me-your-work/scripts/log.sh"'],
+	["skills/statechart/SKILL.md", '"<pstack>/skills/statechart/scripts/statechart"'],
 ];
 
 for (const [file, command] of commands) {

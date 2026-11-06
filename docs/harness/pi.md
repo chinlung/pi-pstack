@@ -2,7 +2,7 @@
 
 pstack skills use Cursor names. In Pi, read this file once per session, then map each Cursor name in a skill with the tables below. `<pstack>` means the folder that holds `skills/`, `agents/`, and `docs/`. It is two directories above the `SKILL.md` you are reading: a skill at `<pstack>/skills/<name>/SKILL.md` resolves `<pstack>` as `../..` from its own folder. If a Cursor field has no row, drop it and say so. Never pass a field or value the tool schema rejects.
 
-55 of the 56 pstack skills set `disable-model-invocation: true`, so Pi leaves them out of the skill list in your system prompt. A skill missing from that list is not missing from the package. Find it by path under `<pstack>/skills/`, never by the skill list.
+57 of the 58 pstack skills set `disable-model-invocation: true`, so Pi leaves them out of the skill list in your system prompt. A skill missing from that list is not missing from the package. Find it by path under `<pstack>/skills/`, never by the skill list.
 
 ## Tools
 
