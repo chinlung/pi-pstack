@@ -113,7 +113,7 @@ skills/             58 個 skill（生成產物）
 agents/             poteto-agent 與 comment-sicko 的 prompt（生成產物，由 extension 讀取後註冊）
 docs/guide/         pstack 指南（生成產物）
 docs/harness/pi.md  Cursor → Pi 名稱對照表
-upstream/           上游 pstack 0.15.36 原始碼（cursor/plugins@2776ddd）
+upstream/           上游 pstack 原樣副本；版本與來源 commit 記在 upstream/.synced-from
 overrides/          機械式移植做不到、改以手寫的檔案
 scripts/            移植與檢查腳本
 ```
@@ -122,11 +122,13 @@ scripts/            移植與檢查腳本
 
 ```bash
 npm install          # 開發依賴：typescript、@types/node
-npm run check        # typecheck + test + check:skills，提交前跑這個
-npm run typecheck    # tsc，strict
-npm test             # node --test
-npm run port:skills  # 重新產生 skills/、agents/、docs/guide/
-npm run check:skills # 確認生成產物是最新的
+npm run check          # typecheck + test + check:skills + check:upstream，提交前跑這個
+npm run typecheck      # tsc，strict
+npm test               # node --test
+npm run port:skills    # 重新產生 skills/、agents/、docs/guide/
+npm run check:skills   # 確認生成產物是最新的
+npm run sync:upstream  # 從 cursor/plugins 同步 upstream/ 並更新 upstream/.synced-from（需連網）
+npm run check:upstream # 離線確認 upstream/ 仍是 .synced-from 記錄的那份
 ```
 
 `typecheck` 與 `test` 會先跑 `scripts/link-host-packages.mjs`，把 Pi 提供給 extension 的套件（`@earendil-works/pi-coding-agent`、`typebox`）依 `~/.pi/agent/install/current-version` 選擇 release（該檔不存在時才回退到 `PI_VERSION`），連進 `node_modules`；另連入 `~/.pi/agent/npm` 下安裝的 `pi-subagents`，讓測試用它真正的 runtime agent registry 驗證兩個 agent 的定義。這些套件由 Pi 在執行時提供，不能列為 dependency；`npm install` 會清掉這些連結，所以每次都重建。沒有安裝 Pi 的環境（例如 CI）可以設 `PI_CODING_AGENT_DIR`，指向一個從 npm 組出同樣目錄結構的資料夾；`.github/workflows/ci.yml` 就是這樣做，並在每次 push 到 main 與每個 PR 跑 `npm run check`。
@@ -147,10 +149,25 @@ worktree 稽核的回歸測試會執行 Bash 腳本，需在 `PATH` 中提供 `b
 ## 與上游同步
 
 ```bash
-# 更新 upstream/ 到新的上游版本，然後：
+npm run sync:upstream                  # 鏡像上游預設分支；--ref <tag 或完整 SHA> 可指定版本：npm run sync:upstream -- --ref <ref>
 npm run port:skills
-npm run check:skills
+npm run check
 ```
+
+`sync:upstream` 對 cursor/plugins 做 sparse checkout，把 `pstack/` 的 `skills/`、`agents/`、`docs/` 換進 `upstream/`，並寫入 `upstream/.synced-from`：
+
+```json
+{
+  "commit": "上游 commit 的完整 SHA（由實際 checkout 取得，不是手填）",
+  "version": "pstack/plugin.json 的版本",
+  "syncedAt": "同步日期（UTC，僅供參考，沒有程式依賴它）",
+  "digest": "sha256:… upstream/ 內容的摘要（路徑、位元組、執行位元）"
+}
+```
+
+下一次同步要看「上游改了什麼」時，用這個 commit 當基準：`git diff <commit> <新 commit> -- pstack`。
+
+`upstream/` 是只讀的鏡像，`check:upstream` 重算摘要並與記錄比對，所以手改 `upstream/` 會讓 `npm run check`（與 CI）失敗；該改的是 `scripts/port-skills.mjs` 的規則或 `overrides/`。這個檢查離線進行，只證明檔案仍是被記錄的那一份，不會去驗證記錄的 commit 在上游真的存在；那一步由 `sync:upstream` 在 checkout 時完成。
 
 上游改了 skill 的內容，port 會自動跟上。上游改了 skill 的「形狀」（例如 `setup-pstack` 那種每步都不同的），就需要在 `overrides/` 補一份。
 

@@ -37,7 +37,9 @@
 		"link:host": "node scripts/link-host-packages.mjs",
 		"port:skills": "node scripts/port-skills.mjs",
 		"check:skills": "node scripts/port-skills.mjs --check",
-		"check": "npm run typecheck && npm test && npm run check:skills"
+		"sync:upstream": "node scripts/sync-upstream.mjs",
+		"check:upstream": "node scripts/sync-upstream.mjs --check",
+		"check": "npm run typecheck && npm test && npm run check:skills && npm run check:upstream"
 	},
 	"files": [
 		"extension",
