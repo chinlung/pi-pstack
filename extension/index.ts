@@ -18,7 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { registerRuntimeAgent, type RuntimeRegistration } from "./runtime-agents.ts";
 import { completeRoles, defaultRoleMap, duplicateModels, detectModels, normalizeEntry, resolveRoleMap, resolveValue, type CatalogModel, type ResolvedRole, type ResolvedSeat } from "./models.ts";
-import { mergeRoleMaps, readRoleMap, writeRoleMap } from "./store.ts";
+import { mergeRoleMaps, readRoleMap, readRoleMapSnapshot, RoleMapConflict, writeRoleMap } from "./store.ts";
 import { BUDGET_EFFORT, BUDGETS, isBudget, ROLES, seatsOf, type BudgetLabel, type RoleEntry, type RoleMap } from "./roles.ts";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -274,7 +274,7 @@ function formatSeat(seat: ResolvedSeat): string {
 }
 
 /** Formats a resolved map, one line per role. A role missing from the map runs on the parent. */
-function formatRoleMap(loaded: LoadedMap, resolved: readonly ResolvedRole[]): string[] {
+function formatRoleMap(loaded: { map: RoleMap; source: MapSource | "proposed" }, resolved: readonly ResolvedRole[]): string[] {
 	const lines = [`budget: ${loaded.map.budget} (${BUDGET_DETAIL[loaded.map.budget]}), source: ${loaded.source}`, ""];
 	for (const entry of resolved) {
 		const same = duplicateModels(entry.seats).length > 0 ? " [same model in more than one seat]" : "";
@@ -301,8 +301,12 @@ async function runSetup(
 		report(ctx, "setup-pstack: no models with working credentials were found", "error");
 		return;
 	}
-	const stored = await readRoleMap();
+	const { parsed: stored, snapshot } = await readRoleMapSnapshot();
 	for (const warning of stored.warnings) report(ctx, `setup-pstack: ${warning}`, "warning");
+	if (snapshot === undefined) {
+		report(ctx, "setup-pstack: the role map was not changed because it could not be read", "error");
+		return;
+	}
 
 	for (const [role, entry] of Object.entries(stored.map?.roles ?? {})) {
 		for (const value of seatsOf(entry)) {
@@ -333,8 +337,15 @@ async function runSetup(
 		map = confirmed;
 	}
 
-	report(ctx, formatRoleMap({ map, source: "stored", warnings: [] }, resolveRoleMap(models, map)).join("\n"));
-	await writeRoleMap(map);
+	try {
+		const cleanupWarning = await writeRoleMap(map, snapshot);
+		if (cleanupWarning) report(ctx, `setup-pstack: ${cleanupWarning}`, "warning");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		report(ctx, `setup-pstack: not saved: ${message}`, error instanceof RoleMapConflict ? "warning" : "error");
+		return;
+	}
+	report(ctx, formatRoleMap({ map, source: "stored" }, resolveRoleMap(models, map)).join("\n"));
 	report(ctx, `setup-pstack: wrote the role map for budget ${budget}. It applies to new subagent launches.`);
 }
 
@@ -359,7 +370,7 @@ async function confirmRoles(ctx: ExtensionContext, models: readonly CatalogModel
 	let map = start;
 	for (;;) {
 		const resolved = resolveRoleMap(models, map);
-		ctx.ui.notify(formatRoleMap({ map, source: "stored", warnings: [] }, resolved).join("\n"), "info");
+		ctx.ui.notify(formatRoleMap({ map, source: "proposed" }, resolved).join("\n"), "info");
 		const action = await ctx.ui.select("pstack roles", [ACCEPT, CHANGE, CANCEL]);
 		if (action === ACCEPT) return map;
 		if (action !== CHANGE) return undefined;

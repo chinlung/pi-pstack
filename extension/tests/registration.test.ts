@@ -221,3 +221,77 @@ test("/setup-pstack reports a stored :level suffix as ignored", async (t) => {
 	}
 	assert.ok(notes.some((note) => note.level === "warning" && /:xhigh suffix is ignored/.test(note.message)), JSON.stringify(notes));
 });
+
+test("/setup-pstack refuses a stale save and a retry keeps both sessions' choices", { timeout: 5000 }, async (t) => {
+	const dir = useAgentDir(t);
+	const path = join(dir, "state", "pi-pstack", "models.json");
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify({
+		budget: "large",
+		roles: { "bug-fix": "inherit-parent", "perf-issue": "inherit-parent" },
+	}));
+	const { commands } = await load();
+	const setup = commands.get("setup-pstack")!.handler;
+	const models = ["gpt-first", "gpt-second"].map((id) => ({
+		provider: "openai", id, reasoning: true, thinkingLevels: ["high", "xhigh"], cost: { input: 1, output: 1 },
+	}));
+	function deferred() {
+		let resolve!: () => void;
+		const promise = new Promise<void>((done) => { resolve = done; });
+		return { promise, resolve };
+	}
+	const reached = deferred();
+	const resume = deferred();
+	function session(role: string, choice: string, pause?: () => Promise<void>) {
+		let selecting = true;
+		const notes: Array<{ message: string; level: string }> = [];
+		return {
+			notes,
+			context: {
+				hasUI: true,
+				scopedModels: models.map((model) => ({ model })),
+				modelRegistry: { getAvailable: () => models, hasConfiguredAuth: () => true },
+				ui: {
+					notify: (message: string, level: string) => notes.push({ message, level }),
+					async select(title: string, options: string[]) {
+						if (title === "Which role?") return options.find((value) => value.startsWith(role + ":"));
+						if (title === role) return choice;
+						assert.equal(title, "pstack roles");
+						if (selecting) {
+							selecting = false;
+							return "Change a role";
+						}
+						await pause?.();
+						return "Accept and write the role map";
+					},
+				},
+			},
+		};
+	}
+	const first = session("bug-fix", "openai/gpt-first", () => {
+		reached.resolve();
+		return resume.promise;
+	});
+	const second = session("perf-issue", "openai/gpt-second");
+	const stale = setup("large", first.context);
+	try {
+		await Promise.race([reached.promise, stale.then(() => { throw new Error("first setup did not reach confirmation"); })]);
+		await setup("large", second.context);
+	} finally {
+		resume.resolve();
+		await stale;
+	}
+	const stored = () => JSON.parse(readFileSync(path, "utf8")).roles;
+	assert.equal(stored()["perf-issue"].value, "openai/gpt-second");
+	assert.equal(stored()["bug-fix"].value, "inherit-parent");
+	assert.ok(first.notes.some(({ level, message }) => level === "warning" && /run \/setup-pstack again/i.test(message)));
+	assert.ok(first.notes.some(({ message }) => /source: proposed/.test(message)));
+	assert.ok(!first.notes.some(({ message }) => /wrote the role map|source: stored/i.test(message)));
+	assert.ok(second.notes.some(({ message }) => /wrote the role map/i.test(message)));
+
+	const retry = session("bug-fix", "openai/gpt-first");
+	await setup("large", retry.context);
+	assert.equal(stored()["bug-fix"].value, "openai/gpt-first");
+	assert.equal(stored()["perf-issue"].value, "openai/gpt-second");
+	assert.ok(retry.notes.some(({ message }) => /wrote the role map/i.test(message)));
+});

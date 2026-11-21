@@ -83,6 +83,7 @@ pi -e . --mode rpc
 - **panel 角色**（`arena runners`、`arena cross-judge pool`、`architect runners`、`interrogate reviewers`）的每個 entry 先分到不同 model family，再在該 family 內依判斷類或程式類挑模型。panel 多樣性優先於「挑最強」：family 不夠分時改用同 family 的不同模型；只要可用模型多於一個，兩個 entry 就不能是同一個模型，否則比較的意義就沒了。
 - **family 是模型的血統，不是 provider**：`claude`、`gpt`、`gemini`、`grok`、`deepseek`、`glm`、`qwen` 等。`anthropic/claude-sonnet-5-5` 與 `amazon-bedrock/global.anthropic.claude-sonnet-5-5` 是同一個模型經兩個 provider 提供，屬於同一個 family。以 provider 當 family 會讓 panel 拿到「同一個模型的兩份」，等於沒有第二意見。
 - 重跑 `/setup-pstack` 會保留你之前手動設的角色（只要模型仍可用），只重新解析缺少的角色和模型已消失的角色。panel 角色整組保留或整組重解，避免 entry 數與 family 分布被打亂；已退役的角色名稱會被移除並列在報告裡。
+- 使用新版的 Pi 工作階段同時執行 `/setup-pstack` 時，較晚的舊設定不會覆蓋先存的角色表；請重跑指令，以最新設定重新確認。這不會鎖住手動編輯或舊版寫入。若 Pi 在寫入途中中斷而一直顯示鎖定，請先關閉所有共用該設定目錄的 Pi 工作階段，再移除與 `models.json` 同目錄的空 `models.json.lock` 目錄；保留 `models.json`。
 - 手寫角色表時寫成 `provider/id:xhigh` 也可以：讀取時會拿掉合法的 level suffix 並回報，level 一律由預算決定。只有在完整字串本身不是 catalog id 時才拿掉，因為有些 id 本身就含冒號。
 - 模型查角色時呼叫 `pstack_models` tool。有 tool、沒有角色表時，回傳由偵測到的模型解析出的預設值（`source: default`）；沒有 tool 或指定的角色不在表裡時，子代理直接用目前對話的模型，並在回覆裡說一聲，不自己編 slug。省略 `role` 時 tool 回傳全部 17 個角色，缺的角色以 parent 席位補上。
 

@@ -9,8 +9,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BUDGET_EFFORT, EFFORT_LADDER, isAtOrBelowBudget, isInherit, ROLES, seatsOf, type RoleEntry, type RoleMap } from "../roles.ts";
 import { normalizeEntry, supportedLevels } from "../models.ts";
-import { mergeRoleMaps, parseRoleMap, readRoleMap, roleMapPath, writeRoleMap } from "../store.ts";
-import { readdirSync, writeFileSync } from "node:fs";
+import { mergeRoleMaps, parseRoleMap, readRoleMap, readRoleMapSnapshot, roleMapPath, RoleMapConflict, writeRoleMap } from "../store.ts";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { useAgentDir } from "./agent-dir.ts";
 import { dirname } from "node:path";
 
@@ -137,17 +137,21 @@ test("a stored role with the wrong number of seats is dropped and reported", () 
 	assert.match(parsed.warnings[0], /"bug-fix": it has 2 model\(s\), and the role takes 1/);
 });
 
-test("concurrent saves publish complete role maps without sharing temporary files", async (t) => {
+test("only one concurrent save can replace an absent role map", async (t) => {
 	useAgentDir(t);
 	const maps: RoleMap[] = Array.from({ length: 16 }, (_, index) => ({
 		budget: "large",
 		roles: { "bug-fix": { value: `provider/model-${index}` } },
 	}));
-	const results = await Promise.allSettled(maps.map(writeRoleMap));
-	assert.deepEqual(results.map((result) => result.status), maps.map(() => "fulfilled"));
+	const results = await Promise.allSettled(maps.map((map) => writeRoleMap(map, null)));
+	const winners = maps.filter((_, index) => results[index].status === "fulfilled");
+	assert.equal(winners.length, 1);
+	for (const result of results) {
+		if (result.status === "rejected") assert.ok(result.reason instanceof RoleMapConflict);
+	}
 	const stored = await readRoleMap();
 	assert.deepEqual(stored.warnings, []);
-	assert.ok(maps.some((map) => JSON.stringify(map) === JSON.stringify(stored.map)));
+	assert.deepEqual(stored.map, winners[0]);
 	assert.deepEqual(readdirSync(dirname(roleMapPath())), ["models.json"]);
 });
 
@@ -155,11 +159,29 @@ test("the role map round-trips through disk, and a broken file is reported, not 
 	useAgentDir(t);
 	assert.deepEqual(await readRoleMap(), { warnings: [] });
 	const map: RoleMap = { budget: "medium", roles: { "bug-fix": { value: "openai/gpt-6-sol" } } };
-	await writeRoleMap(map);
+	await writeRoleMap(map, null);
 	assert.deepEqual(await readRoleMap(), { map, warnings: [] });
 	assert.deepEqual(readdirSync(dirname(roleMapPath())), ["models.json"], "no temporary file is left behind");
 	writeFileSync(roleMapPath(), "{ not json");
 	const broken = await readRoleMap();
 	assert.equal(broken.map, undefined);
 	assert.match(broken.warnings[0], /is not valid JSON/);
+});
+
+test("a save leaves another writer's lock alone", async (t) => {
+	useAgentDir(t);
+	const path = roleMapPath();
+	mkdirSync(`${path}.lock`, { recursive: true });
+	await assert.rejects(writeRoleMap({ budget: "small", roles: {} }, null), RoleMapConflict);
+	assert.deepEqual(readdirSync(dirname(path)), ["models.json.lock"]);
+});
+
+test("a read failure is not treated as a missing role map", async (t) => {
+	useAgentDir(t);
+	mkdirSync(roleMapPath(), { recursive: true });
+	const result = await readRoleMapSnapshot();
+	assert.equal(result.snapshot, undefined);
+	assert.match(result.parsed.warnings[0], /could not read/);
+	await assert.rejects(writeRoleMap({ budget: "small", roles: {} }, null), { code: "EISDIR" });
+	assert.deepEqual(readdirSync(dirname(roleMapPath())), ["models.json"]);
 });
