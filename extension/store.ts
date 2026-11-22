@@ -6,7 +6,7 @@
  * shared by every session of the same user.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isBudget, ROLES, seatsOf, type RoleEntry, type RoleMap } from "./roles.ts";
@@ -97,20 +97,24 @@ async function readRoleMapBytes(path: string): Promise<Buffer | null> {
 	}
 }
 
-/** The exact input for setup's save check; undefined means reading failed, not an absent map. */
-export async function readRoleMapSnapshot(): Promise<{ parsed: ParsedRoleMap; snapshot?: Buffer | null }> {
+export type RoleMapSnapshot =
+	| { readonly ok: false; readonly parsed: ParsedRoleMap }
+	| { readonly ok: true; readonly parsed: ParsedRoleMap; readonly snapshot: Buffer | null };
+
+/** The exact input for setup's save check; `ok: false` means reading failed, while `snapshot: null` means an absent map. */
+export async function readRoleMapSnapshot(): Promise<RoleMapSnapshot> {
 	const path = roleMapPath();
 	let snapshot: Buffer | null;
 	try {
 		snapshot = await readRoleMapBytes(path);
 	} catch (error) {
-		return { parsed: { warnings: [`could not read ${path}: ${(error as Error).message}`] } };
+		return { ok: false, parsed: { warnings: [`could not read ${path}: ${(error as Error).message}`] } };
 	}
-	if (snapshot === null) return { snapshot, parsed: { warnings: [] } };
+	if (snapshot === null) return { ok: true, snapshot, parsed: { warnings: [] } };
 	try {
-		return { snapshot, parsed: parseRoleMap(JSON.parse(snapshot.toString("utf8"))) };
+		return { ok: true, snapshot, parsed: parseRoleMap(JSON.parse(snapshot.toString("utf8"))) };
 	} catch (error) {
-		return { snapshot, parsed: { warnings: [`${path} is not valid JSON: ${(error as Error).message}`] } };
+		return { ok: true, snapshot, parsed: { warnings: [`${path} is not valid JSON: ${(error as Error).message}`] } };
 	}
 }
 
@@ -141,7 +145,13 @@ export async function writeRoleMap(map: RoleMap, expected: Buffer | null): Promi
 		}
 		const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
 		try {
-			await writeFile(temporary, `${JSON.stringify(map, null, 2)}\n`, "utf8");
+			const handle = await open(temporary, "wx");
+			try {
+				await handle.writeFile(`${JSON.stringify(map, null, 2)}\n`, "utf8");
+				await handle.sync();
+			} finally {
+				await handle.close();
+			}
 			await rename(temporary, path);
 		} catch (error) {
 			await rm(temporary, { force: true }).catch(() => undefined);

@@ -180,7 +180,7 @@ test("a read failure is not treated as a missing role map", async (t) => {
 	useAgentDir(t);
 	mkdirSync(roleMapPath(), { recursive: true });
 	const result = await readRoleMapSnapshot();
-	assert.equal(result.snapshot, undefined);
+	assert.equal(result.ok, false);
 	assert.match(result.parsed.warnings[0], /could not read/);
 	await assert.rejects(writeRoleMap({ budget: "small", roles: {} }, null), { code: "EISDIR" });
 	assert.deepEqual(readdirSync(dirname(roleMapPath())), ["models.json"]);

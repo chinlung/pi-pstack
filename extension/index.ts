@@ -301,9 +301,10 @@ async function runSetup(
 		report(ctx, "setup-pstack: no models with working credentials were found", "error");
 		return;
 	}
-	const { parsed: stored, snapshot } = await readRoleMapSnapshot();
+	const read = await readRoleMapSnapshot();
+	const { parsed: stored } = read;
 	for (const warning of stored.warnings) report(ctx, `setup-pstack: ${warning}`, "warning");
-	if (snapshot === undefined) {
+	if (!read.ok) {
 		report(ctx, "setup-pstack: the role map was not changed because it could not be read", "error");
 		return;
 	}
@@ -338,7 +339,7 @@ async function runSetup(
 	}
 
 	try {
-		const cleanupWarning = await writeRoleMap(map, snapshot);
+		const cleanupWarning = await writeRoleMap(map, read.snapshot);
 		if (cleanupWarning) report(ctx, `setup-pstack: ${cleanupWarning}`, "warning");
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
