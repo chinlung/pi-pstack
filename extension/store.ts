@@ -6,7 +6,7 @@
  * shared by every session of the same user.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isBudget, ROLES, seatsOf, type RoleEntry, type RoleMap } from "./roles.ts";
@@ -85,35 +85,85 @@ export function parseRoleMap(raw: unknown): ParsedRoleMap {
  * every role on a default the user did not choose.
  */
 export async function readRoleMap(): Promise<ParsedRoleMap> {
-	let text: string;
+	return (await readRoleMapSnapshot()).parsed;
+}
+
+async function readRoleMapBytes(path: string): Promise<Buffer | null> {
 	try {
-		text = await readFile(roleMapPath(), "utf8");
+		return await readFile(path);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { warnings: [] };
-		return { warnings: [`could not read ${roleMapPath()}: ${(error as Error).message}`] };
-	}
-	try {
-		return parseRoleMap(JSON.parse(text));
-	} catch (error) {
-		return { warnings: [`${roleMapPath()} is not valid JSON: ${(error as Error).message}`] };
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw error;
 	}
 }
 
+export type RoleMapSnapshot =
+	| { readonly ok: false; readonly parsed: ParsedRoleMap }
+	| { readonly ok: true; readonly parsed: ParsedRoleMap; readonly snapshot: Buffer | null };
+
+/** The exact input for setup's save check; `ok: false` means reading failed, while `snapshot: null` means an absent map. */
+export async function readRoleMapSnapshot(): Promise<RoleMapSnapshot> {
+	const path = roleMapPath();
+	let snapshot: Buffer | null;
+	try {
+		snapshot = await readRoleMapBytes(path);
+	} catch (error) {
+		return { ok: false, parsed: { warnings: [`could not read ${path}: ${(error as Error).message}`] } };
+	}
+	if (snapshot === null) return { ok: true, snapshot, parsed: { warnings: [] } };
+	try {
+		return { ok: true, snapshot, parsed: parseRoleMap(JSON.parse(snapshot.toString("utf8"))) };
+	} catch (error) {
+		return { ok: true, snapshot, parsed: { warnings: [`${path} is not valid JSON: ${(error as Error).message}`] } };
+	}
+}
+
+export class RoleMapConflict extends Error {}
+
 /**
- * Writes the role map to a temporary file and renames it over the target. A rename is atomic on
- * one filesystem, so a crash never leaves a truncated map that would parse as broken.
+ * Commits only against the bytes setup originally read. The lock directory serializes the
+ * comparison and atomic rename across setup processes, without holding a lock during prompts.
  */
-export async function writeRoleMap(map: RoleMap): Promise<void> {
+export async function writeRoleMap(map: RoleMap, expected: Buffer | null): Promise<string | undefined> {
 	const path = roleMapPath();
 	await mkdir(dirname(path), { recursive: true });
-	const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+	const lock = `${path}.lock`;
 	try {
-		await writeFile(temporary, `${JSON.stringify(map, null, 2)}\n`, "utf8");
-		await rename(temporary, path);
+		await mkdir(lock);
 	} catch (error) {
-		await rm(temporary, { force: true }).catch(() => undefined);
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+			throw new RoleMapConflict("the role map is locked for another save; run /setup-pstack again");
+		}
 		throw error;
 	}
+
+	let cleanupWarning: string | undefined;
+	try {
+		const current = await readRoleMapBytes(path);
+		if (current === null ? expected !== null : expected === null || !current.equals(expected)) {
+			throw new RoleMapConflict("the role map changed during setup; run /setup-pstack again");
+		}
+		const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+		try {
+			const handle = await open(temporary, "wx");
+			try {
+				await handle.writeFile(`${JSON.stringify(map, null, 2)}\n`, "utf8");
+				await handle.sync();
+			} finally {
+				await handle.close();
+			}
+			await rename(temporary, path);
+		} catch (error) {
+			await rm(temporary, { force: true }).catch(() => undefined);
+			throw error;
+		}
+	} finally {
+		// Never force-remove or automatically reclaim an uncertain lock.
+		await rmdir(lock).catch((error: Error) => {
+			cleanupWarning = `could not remove save lock ${lock}: ${error.message}`;
+		});
+	}
+	return cleanupWarning;
 }
 
 /** A merged map, and the stored roles that were replaced because a seat no longer launches. */
